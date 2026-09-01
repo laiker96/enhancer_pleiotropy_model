@@ -126,6 +126,38 @@ For tabular sequence inference:
 `sequences.tsv` must contain `id` and `sequence`; production checkpoints
 expect 2,048 unambiguous A/C/G/T bases.
 
+## Observed/predicted browser tracks
+
+Generate paired observed and predicted BigWigs across the final chr2L
+validation interval, followed by a portable IGV session:
+
+```bash
+.venv/bin/enhancer-browser-tracks \
+  --checkpoint results/default_4x/model/best_model.pt \
+  --reference-fasta data/raw/reference/dm6.fa \
+  --blacklist-bed data/raw/reference/dm6.blacklist.bed \
+  --observed-bigwig-directory data/raw/bigwig \
+  --output-directory results/default_4x/browser/chr2L_validation \
+  --chromosome chr2L \
+  --region-start 0 \
+  --region-end 11751856 \
+  --stride 256 \
+  --batch-size 64 \
+  --device cuda \
+  --mixed-precision fp16
+```
+
+The command creates observed/predicted pairs for both assays and all eight
+contexts plus `igv_session.xml`. It uses a complete genome-anchored sliding
+grid, not the balanced training-table subset. Every overlapping prediction is
+averaged at each native model bin (16 bp for ATAC and 64 bp for H3K27ac), and
+the observed tracks use the identical bins and support mask. Expensive
+inference is checkpointed in `.partial_predictions.npz`.
+
+The current local checkpoint was selected on chr2L validation. These browser
+tracks are therefore appropriate for qualitative model QC, not as an
+untouched test-set performance estimate.
+
 ## Training defaults
 
 - stochastic reverse complement with probability 0.5;
