@@ -12,6 +12,7 @@ CONTEXTS = config["contexts"]
 BIGWIG_DIRECTORY = config["inputs"]["bigwig_directory"]
 BROWSER_CONFIG = config["browser_tracks"]
 REPORT_CONFIG = config["browser_report"]
+SPECIFICITY_CONFIG = config.get("specificity_finetuning", {})
 BROWSER_DIRECTORY = f"{OUTPUT}/{BROWSER_CONFIG['subdirectory']}"
 REPORT_DIRECTORY = f"{OUTPUT}/{REPORT_CONFIG['subdirectory']}"
 BROWSER_TRACKS = [
@@ -38,6 +39,14 @@ rule all:
     input:
         f"{OUTPUT}/model/best_model.pt",
         f"{OUTPUT}/model/metrics.json",
+        *(
+            [
+                f"{OUTPUT}/{SPECIFICITY_CONFIG['model_subdirectory']}/best_model.pt",
+                f"{OUTPUT}/{SPECIFICITY_CONFIG['model_subdirectory']}/metrics.json",
+            ]
+            if SPECIFICITY_CONFIG.get("enabled", False)
+            else []
+        ),
 
 
 rule prepared_data:
@@ -207,7 +216,32 @@ rule train:
     shell:
         """
         {PYTHON} -m enhancer_pleiotropy_model.training \
-          --config {input.config:q} --resume 2>&1 | tee {log:q}
+          --config {input.config:q} --stage base --resume 2>&1 | tee {log:q}
+        """
+
+
+rule finetune_specificity:
+    input:
+        config=f"{OUTPUT}/run_config.yaml",
+        base=f"{OUTPUT}/model/best_model.pt",
+        base_metrics=f"{OUTPUT}/model/metrics.json",
+        dataset=f"{OUTPUT}/data/windows.tsv.gz",
+        atac_train=f"{OUTPUT}/data/profiles/atac/train_profiles.npy",
+        atac_validation=f"{OUTPUT}/data/profiles/atac/validation_profiles.npy",
+        h3_train=f"{OUTPUT}/data/profiles/h3k27ac/train_profiles.npy",
+        h3_validation=f"{OUTPUT}/data/profiles/h3k27ac/validation_profiles.npy",
+    output:
+        best=f"{OUTPUT}/{SPECIFICITY_CONFIG.get('model_subdirectory', 'model_specific_finetune')}/best_model.pt",
+        metrics=f"{OUTPUT}/{SPECIFICITY_CONFIG.get('model_subdirectory', 'model_specific_finetune')}/metrics.json",
+    log:
+        "logs/train_4x_specificity_finetune.log",
+    threads: 4
+    resources:
+        gpu=1
+    shell:
+        """
+        {PYTHON} -m enhancer_pleiotropy_model.training \
+          --config {input.config:q} --stage specificity --resume 2>&1 | tee {log:q}
         """
 
 

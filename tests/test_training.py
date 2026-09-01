@@ -1,11 +1,16 @@
 import pytest
+import numpy as np
 import torch
 
+from enhancer_pleiotropy_model.data import WindowRecord
 from enhancer_pleiotropy_model.training import (
     CrestedCosineMSELogLoss,
     WarmupPlateauScheduler,
     build_loss_criteria,
     calculate_losses,
+    context_gini,
+    fit_specificity_thresholds,
+    select_specific_peak_indices,
 )
 
 
@@ -87,3 +92,48 @@ def test_both_assays_use_independent_crested_losses():
     assert losses["h3k27ac"].item() == pytest.approx(-1.0)
     assert losses["total"].item() == pytest.approx(-2.0)
     assert metadata["context_axis"] == -1
+
+
+def test_context_gini_and_specific_peak_union_are_assay_aware():
+    sources = [
+        "atac_peak_overlap",
+        "atac_peak_overlap",
+        "atac_peak_overlap",
+        "h3k27ac_peak_overlap",
+        "h3k27ac_peak_overlap",
+        "h3k27ac_peak_overlap",
+        "genomic_background",
+    ]
+    records = [
+        WindowRecord(
+            identifier=str(index),
+            source=source,
+            chrom="chr2R",
+            start=index * 2048,
+            end=(index + 1) * 2048,
+            target_start=index * 2048 + 768,
+            target_end=index * 2048 + 1280,
+            block_id="train:chr2R:0",
+            split="train",
+            sequence="A" * 2048,
+        )
+        for index, source in enumerate(sources)
+    ]
+    atac = np.ones((len(records), 2, 8), dtype=np.float32)
+    h3k27ac = np.ones_like(atac)
+    atac[2, :, 1:] = 0
+    h3k27ac[5, :, 1:] = 0
+    atac[6, :, 1:] = 0
+    h3k27ac[6, :, 1:] = 0
+
+    assert context_gini(np.asarray([[1, 0, 0, 0, 0, 0, 0, 0]])).item() == pytest.approx(0.875)
+    thresholds = fit_specificity_thresholds(records, atac, h3k27ac, 1.0)
+    selected, counts = select_specific_peak_indices(
+        records, atac, h3k27ac, thresholds
+    )
+    assert selected.tolist() == [2, 5]
+    assert counts == {
+        "atac_specific": 1,
+        "h3k27ac_specific": 1,
+        "union_specific": 2,
+    }

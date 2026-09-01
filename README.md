@@ -87,7 +87,7 @@ Run the complete workflow on a CUDA host:
 ```bash
 mkdir -p logs
 tmux new -d -s enhancer_pleiotropy_train \
-  '.venv/bin/snakemake --configfile config/default.yaml --cores 4 --resources gpu=1 --rerun-incomplete 2>&1 | tee logs/train.log'
+  '.venv/bin/snakemake --configfile config/final_4x.yaml --cores 4 --resources gpu=1 --rerun-incomplete 2>&1 | tee logs/train.log'
 tail -f logs/train.log
 ```
 
@@ -100,8 +100,11 @@ environment_job=$(sbatch --parsable cluster/setup_environment.sbatch)
 sbatch --dependency="afterok:${environment_job}" cluster/train_final_4x.sbatch
 ```
 
-The final training launcher calls the restartable trainer directly, so raw
-BigWigs are not needed on the GPU node once prepared arrays have been copied.
+The final launcher first trains the broad base model for up to 40 epochs, then
+loads its best checkpoint and fine-tunes the full network for up to 10 epochs
+on context-specific peak windows at an initial learning rate of `1e-5`. Both
+stages are restartable, and raw BigWigs are not needed on the GPU node once
+prepared arrays have been copied.
 
 ## Load a checkpoint
 
@@ -198,6 +201,16 @@ log-MSE, mean context-vector cosine similarity, dynamic cosine weight, and
 combined loss. The checkpoint records the exact loss configuration and
 multipliers. The loss change does not alter the prepared data or chromosome
 splits.
+
+The CREsted-style specificity stage fits assay-specific Gini thresholds on
+training peaks only. Window activity is the mean target signal in each of the
+eight contexts. A peak is retained when its ATAC Gini exceeds the ATAC
+training-peak mean plus one standard deviation, or its H3K27ac Gini exceeds
+the corresponding H3K27ac threshold. Background windows are excluded from
+this stage. The fine-tuned checkpoint is selected on the matching
+specificity-only validation subset, while full-validation metrics are also
+logged every epoch. Outputs are written to `model_specific_finetune/`; the
+broad base outputs remain in `model/`.
 
 The test chromosome is excluded from training and validation and is evaluated
 only after model and analysis choices are frozen.

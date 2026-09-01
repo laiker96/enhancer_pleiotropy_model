@@ -179,6 +179,7 @@ class JointProfileDataset(Dataset):
         training: bool,
         rc_probability: float,
         seed: int,
+        indices: Sequence[int] | None = None,
     ) -> None:
         if not (len(records) == len(atac) == len(h3k27ac)):
             raise ValueError("Record and profile counts differ")
@@ -190,12 +191,19 @@ class JointProfileDataset(Dataset):
         self.rc_probability = rc_probability
         self.seed = seed
         self.epoch = 0
+        self.indices = (
+            tuple(range(len(records)))
+            if indices is None
+            else tuple(int(index) for index in indices)
+        )
+        if any(index < 0 or index >= len(records) for index in self.indices):
+            raise ValueError("Dataset subset index is outside the prepared records")
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
 
     def __len__(self) -> int:
-        return len(self.records)
+        return len(self.indices)
 
     def _reverse(self, index: int) -> bool:
         if not self.training or self.rc_probability == 0:
@@ -207,10 +215,11 @@ class JointProfileDataset(Dataset):
         return fraction < self.rc_probability
 
     def __getitem__(self, index: int) -> tuple[str, torch.Tensor, torch.Tensor, bool]:
-        sequence = self.records[index].sequence
-        atac = np.array(self.atac[index], dtype=np.float32, copy=True)
+        source_index = self.indices[index]
+        sequence = self.records[source_index].sequence
+        atac = np.array(self.atac[source_index], dtype=np.float32, copy=True)
         h3k27ac = pool_adjacent(
-            np.asarray(self.h3k27ac[index], dtype=np.float32),
+            np.asarray(self.h3k27ac[source_index], dtype=np.float32),
             self.h3k27ac_pool_size,
         )
         reverse = self._reverse(index)

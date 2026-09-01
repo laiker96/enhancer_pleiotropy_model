@@ -30,6 +30,7 @@ from .constants import (
 )
 from .data import (
     JointProfileDataset,
+    WindowRecord,
     load_profiles,
     make_loader,
     read_windows,
@@ -44,6 +45,11 @@ from .metrics import (
     scientific_composite,
 )
 from .model import EnformerLikeJointProfileRegressor, MODEL_PRESETS
+from .preprocessing.windows import (
+    H3K27AC_PEAK_SOURCE,
+    JOINT_PEAK_SOURCE,
+    PEAK_SOURCE,
+)
 
 
 class StandardizedLog1pHuberLoss(nn.Module):
@@ -190,6 +196,115 @@ def build_loss_criteria(
         "dynamic_weight": "clamp(absolute log-MSE, 1, max_weight)",
     }
     return criteria["atac"], criteria["h3k27ac"], metadata
+
+
+def context_gini(activity: np.ndarray, epsilon: float = 1e-8) -> np.ndarray:
+    """Calculate the Gini index across contexts for each genomic window."""
+    values = np.asarray(activity, dtype=np.float64)
+    if values.ndim != 2 or values.shape[1] < 2:
+        raise ValueError("Gini activity must be [windows, contexts]")
+    if np.any(values < 0) or np.any(~np.isfinite(values)):
+        raise ValueError("Gini activity must be finite and nonnegative")
+    ordered = np.sort(values, axis=1)
+    context_count = ordered.shape[1]
+    coefficients = 2 * np.arange(1, context_count + 1) - context_count - 1
+    totals = ordered.sum(axis=1)
+    numerator = (ordered * coefficients).sum(axis=1)
+    return np.divide(
+        numerator,
+        context_count * totals,
+        out=np.zeros_like(totals),
+        where=totals > epsilon,
+    )
+
+
+def peak_specificity_scores(
+    records: list[WindowRecord],
+    profiles: np.ndarray,
+    eligible_sources: frozenset[str],
+    *,
+    chunk_size: int = 4096,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return source-eligible indices and Gini scores of window-mean profiles."""
+    indices = np.asarray(
+        [index for index, record in enumerate(records) if record.source in eligible_sources],
+        dtype=np.int64,
+    )
+    scores = np.empty(len(indices), dtype=np.float64)
+    for start in range(0, len(indices), chunk_size):
+        chunk_indices = indices[start : start + chunk_size]
+        chunk = np.asarray(profiles[chunk_indices], dtype=np.float32)
+        scores[start : start + len(chunk_indices)] = context_gini(
+            chunk.mean(axis=1, dtype=np.float64)
+        )
+    return indices, scores
+
+
+def fit_specificity_thresholds(
+    records: list[WindowRecord],
+    atac_profiles: np.ndarray,
+    h3_profiles: np.ndarray,
+    standard_deviation_multiplier: float,
+) -> dict[str, dict[str, float]]:
+    """Fit CREsted-style Gini thresholds using training peaks only."""
+    if standard_deviation_multiplier < 0:
+        raise ValueError("Gini standard-deviation multiplier cannot be negative")
+    assay_inputs = {
+        "atac": (
+            atac_profiles,
+            frozenset((PEAK_SOURCE, JOINT_PEAK_SOURCE)),
+        ),
+        "h3k27ac": (
+            h3_profiles,
+            frozenset((H3K27AC_PEAK_SOURCE, JOINT_PEAK_SOURCE)),
+        ),
+    }
+    thresholds: dict[str, dict[str, float]] = {}
+    for assay, (profiles, eligible_sources) in assay_inputs.items():
+        _, scores = peak_specificity_scores(records, profiles, eligible_sources)
+        if len(scores) < 2:
+            raise ValueError(f"Not enough {assay} peak windows to fit specificity")
+        mean = float(scores.mean())
+        standard_deviation = float(scores.std())
+        thresholds[assay] = {
+            "mean": mean,
+            "standard_deviation": standard_deviation,
+            "standard_deviation_multiplier": standard_deviation_multiplier,
+            "threshold": mean + standard_deviation_multiplier * standard_deviation,
+            "eligible_windows": int(len(scores)),
+        }
+    return thresholds
+
+
+def select_specific_peak_indices(
+    records: list[WindowRecord],
+    atac_profiles: np.ndarray,
+    h3_profiles: np.ndarray,
+    thresholds: dict[str, dict[str, float]],
+) -> tuple[np.ndarray, dict[str, int]]:
+    """Select peak windows specific in ATAC or H3K27ac using fixed thresholds."""
+    assay_inputs = {
+        "atac": (
+            atac_profiles,
+            frozenset((PEAK_SOURCE, JOINT_PEAK_SOURCE)),
+        ),
+        "h3k27ac": (
+            h3_profiles,
+            frozenset((H3K27AC_PEAK_SOURCE, JOINT_PEAK_SOURCE)),
+        ),
+    }
+    selected = np.zeros(len(records), dtype=np.bool_)
+    counts: dict[str, int] = {}
+    for assay, (profiles, eligible_sources) in assay_inputs.items():
+        indices, scores = peak_specificity_scores(records, profiles, eligible_sources)
+        assay_selected = indices[scores > float(thresholds[assay]["threshold"])]
+        selected[assay_selected] = True
+        counts[f"{assay}_specific"] = int(len(assay_selected))
+    selected_indices = np.flatnonzero(selected)
+    if not len(selected_indices):
+        raise ValueError("No peak windows passed the specificity thresholds")
+    counts["union_specific"] = int(len(selected_indices))
+    return selected_indices, counts
 
 
 class WarmupPlateauScheduler:
@@ -568,6 +683,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--stage",
+        choices=("base", "specificity"),
+        default="base",
+        help="Train the broad base model or fine-tune it on specific peaks.",
+    )
     parser.add_argument("--smoke-test", action="store_true")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"))
     parser.add_argument("--mixed-precision", choices=("no", "fp16", "bf16"))
@@ -578,6 +699,12 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     training = dict(config["training"])
+    stage = args.stage
+    specificity_config = dict(config.get("specificity_finetuning", {}))
+    if stage == "specificity":
+        if not specificity_config.get("enabled", False):
+            raise ValueError("Specificity fine-tuning is not enabled in the config")
+        training.update(dict(specificity_config["training"]))
     if args.device is not None:
         training["device"] = args.device
     if args.mixed_precision is not None:
@@ -590,7 +717,11 @@ def main() -> None:
 
     root = Path(config["output_directory"])
     data_directory = root / "data"
-    model_directory = root / "model"
+    model_directory = root / (
+        str(specificity_config["model_subdirectory"])
+        if stage == "specificity"
+        else "model"
+    )
     dataset_path = data_directory / "windows.tsv.gz"
     records = read_windows(dataset_path)
     sequence_lengths = {
@@ -631,6 +762,42 @@ def main() -> None:
         raise ValueError("Profile target geometry differs from configuration")
     h3_pool_size = int(profiles_config["h3k27ac_output_pool_size"])
 
+    specificity_metadata: dict[str, Any] | None = None
+    train_indices: np.ndarray | None = None
+    validation_specific_mask: np.ndarray | None = None
+    if stage == "specificity":
+        gini_multiplier = float(specificity_config["gini_standard_deviations"])
+        thresholds = fit_specificity_thresholds(
+            records["train"],
+            atac_profiles["train"],
+            h3_profiles["train"],
+            gini_multiplier,
+        )
+        train_indices, train_specific_counts = select_specific_peak_indices(
+            records["train"],
+            atac_profiles["train"],
+            h3_profiles["train"],
+            thresholds,
+        )
+        validation_indices, validation_specific_counts = select_specific_peak_indices(
+            records["validation"],
+            atac_profiles["validation"],
+            h3_profiles["validation"],
+            thresholds,
+        )
+        validation_specific_mask = np.zeros(len(records["validation"]), dtype=np.bool_)
+        validation_specific_mask[validation_indices] = True
+        specificity_metadata = {
+            "definition": "ATAC-specific OR H3K27ac-specific peak window",
+            "activity_summary": "mean signal across the assay target bins",
+            "score": "Gini index across the eight contexts",
+            "threshold_fit_split": "train",
+            "threshold_rule": "training peak mean + multiplier * training peak standard deviation",
+            "thresholds": thresholds,
+            "train_counts": train_specific_counts,
+            "validation_counts": validation_specific_counts,
+        }
+
     train_dataset = JointProfileDataset(
         records["train"],
         atac_profiles["train"],
@@ -639,6 +806,7 @@ def main() -> None:
         training=True,
         rc_probability=float(training["stochastic_rc_probability"]),
         seed=seed,
+        indices=train_indices,
     )
     validation_dataset = JointProfileDataset(
         records["validation"],
@@ -678,6 +846,30 @@ def main() -> None:
         h3k27ac_output_pool_size=h3_pool_size,
     ).to(device)
     model.initialize_output_means(target_means["atac"], target_means["h3k27ac"])
+    initialization_metadata: dict[str, Any] | None = None
+    if stage == "specificity":
+        initialization_path = root / str(specificity_config["initialization_checkpoint"])
+        if not initialization_path.is_file():
+            raise FileNotFoundError(
+                f"Specificity fine-tuning requires {initialization_path}"
+            )
+        initial_checkpoint = torch.load(
+            initialization_path, map_location="cpu", weights_only=False
+        )
+        if initial_checkpoint.get("kind") != "enformer_like_dense_atac_h3k27ac_profile_regressor":
+            raise ValueError("Specificity initialization checkpoint has the wrong kind")
+        if tuple(initial_checkpoint.get("contexts", ())) != contexts:
+            raise ValueError("Specificity initialization context order differs")
+        dataset_hash = sha256_file(dataset_path)
+        if initial_checkpoint.get("dataset_sha256") != dataset_hash:
+            raise ValueError("Specificity initialization dataset differs")
+        model.load_state_dict(initial_checkpoint["state_dict"], strict=True)
+        initialization_metadata = {
+            "path": str(initialization_path),
+            "sha256": sha256_file(initialization_path),
+            "base_epoch": int(initial_checkpoint["epoch"]),
+            "base_score": float(initial_checkpoint["checkpoint_selection"]["score"]),
+        }
     atac_criterion, h3_criterion, loss_metadata = build_loss_criteria(
         training, h3_means, h3_standard_deviations, device
     )
@@ -721,6 +913,9 @@ def main() -> None:
         "atac_profiles_sha256": atac_metadata["outputs"]["train"]["sha256"],
         "h3k27ac_profiles_sha256": h3_metadata["outputs"]["train"]["sha256"],
         "architecture": architecture,
+        "training_stage": stage,
+        "specificity": specificity_metadata,
+        "initialization": initialization_metadata,
     }
     best_path = model_directory / "best_model.pt"
     last_path = model_directory / "last_checkpoint.pt"
@@ -758,13 +953,17 @@ def main() -> None:
         json.dumps(
             {
                 "event": "training_start",
+                "training_stage": stage,
                 "device": str(device),
                 "architecture": architecture,
                 "split_counts": counts,
+                "training_examples": len(train_dataset),
                 "batches_per_epoch": batches_per_epoch,
                 "warmup_steps": warmup_steps,
                 "decay_steps": decay_steps,
                 "loss": loss_metadata,
+                "specificity": specificity_metadata,
+                "initialization": initialization_metadata,
                 "target_shapes": {
                     "atac": [int(atac_metadata["bins_per_target"]), len(contexts)],
                     "h3k27ac": [int(h3_metadata["bins_per_target"]) // h3_pool_size, len(contexts)],
@@ -885,7 +1084,29 @@ def main() -> None:
         epoch_metrics["h3k27ac"]["segments"] = h3k27ac_segment_metrics(
             labels["h3k27ac"], predictions["h3k27ac"], contexts
         )
-        score = scientific_composite(epoch_metrics)
+        specificity_metrics: dict[str, Any] | None = None
+        if stage == "specificity":
+            if validation_specific_mask is None:
+                raise RuntimeError("Specificity validation mask was not initialized")
+            selected_mask = validation_specific_mask[: len(labels["atac"])]
+            if not selected_mask.any():
+                raise ValueError("No specific peaks were evaluated in validation")
+            specificity_metrics = {
+                assay: assay_validation_metrics(
+                    labels[assay][selected_mask],
+                    predictions[assay][selected_mask],
+                    np.ones(int(selected_mask.sum()), dtype=np.bool_),
+                    contexts,
+                )
+                for assay in ASSAYS
+            }
+            specificity_metrics["h3k27ac"]["segments"] = h3k27ac_segment_metrics(
+                labels["h3k27ac"][selected_mask],
+                predictions["h3k27ac"][selected_mask],
+                contexts,
+            )
+        score_metrics = specificity_metrics or epoch_metrics
+        score = scientific_composite(score_metrics)
         plateau = scheduler.step_validation(score)
         epoch_result = {
             "epoch": epoch_index + 1,
@@ -898,6 +1119,8 @@ def main() -> None:
             "plateau": plateau,
             "validation": epoch_metrics,
         }
+        if specificity_metrics is not None:
+            epoch_result["specificity_validation"] = specificity_metrics
         history.append(epoch_result)
         print(json.dumps({"event": "epoch_complete", **epoch_result}, sort_keys=True), flush=True)
         if score > best_score:
@@ -921,9 +1144,16 @@ def main() -> None:
                     "dataset_sha256": run_signature["dataset_sha256"],
                     "epoch": best_epoch,
                     "checkpoint_selection": {
-                        "metric": "scientific_composite",
+                        "metric": (
+                            "specificity_scientific_composite"
+                            if stage == "specificity"
+                            else "scientific_composite"
+                        ),
                         "score": best_score,
                     },
+                    "training_stage": stage,
+                    "specificity": specificity_metadata,
+                    "initialization": initialization_metadata,
                     "loss": loss_metadata,
                     "training_target_means": {
                         assay: values.tolist() for assay, values in target_means.items()
@@ -964,12 +1194,20 @@ def main() -> None:
 
     metrics = {
         "method": "joint_atac_h3k27ac_profile_training_v1",
+        "training_stage": stage,
         "contexts": list(contexts),
         "dataset": {"path": str(dataset_path), "sha256": run_signature["dataset_sha256"]},
         "split_counts": counts,
         "model": architecture,
         "best_epoch": best_epoch,
         "best_scientific_composite": best_score,
+        "checkpoint_selection_metric": (
+            "specificity_scientific_composite"
+            if stage == "specificity"
+            else "scientific_composite"
+        ),
+        "specificity": specificity_metadata,
+        "initialization": initialization_metadata,
         "history": history,
         "configuration": config,
     }

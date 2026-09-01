@@ -102,3 +102,6 @@ training:
   gradient_clip_norm: 1.0
   mixed_precision: fp16
   device: cuda
+
+specificity_finetuning:
+  enabled: false

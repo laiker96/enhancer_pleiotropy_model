@@ -44,3 +44,28 @@ Every best-model and restart checkpoint records the full resolved
 configuration. A restart is rejected if the loss configuration differs from
 the checkpoint, preventing accidental continuation under a different
 objective.
+
+## Specificity fine-tuning contract
+
+When `specificity_finetuning.enabled` is true, training has two sequential,
+independently restartable stages:
+
+1. the base stage trains on the complete prepared training table and writes
+   `model/`;
+2. the specificity stage initializes from `model/best_model.pt`, resets the
+   optimizer at the configured lower learning rate, and writes
+   `model_specific_finetune/`.
+
+The specificity score is the Gini index across contexts after averaging each
+assay's target profile over genomic bins. ATAC thresholds use ATAC and joint
+peak windows; H3K27ac thresholds use H3K27ac and joint peak windows. Each
+threshold is fitted on the training split as `mean + k * standard deviation`.
+The stage-two set is the union of windows passing either threshold; random
+background windows cannot enter it. Training-derived thresholds are applied
+unchanged to validation.
+
+Stage-two checkpoint selection uses the scientific composite calculated only
+on the specific validation subset. The log also retains complete-validation
+losses and metrics so loss of broad performance can be detected. Release
+checkpoints record the threshold values, subset counts, initialization
+checkpoint hash, and training stage.

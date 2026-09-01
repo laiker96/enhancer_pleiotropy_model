@@ -41,3 +41,18 @@ training:
   plateau_patience: 3
   plateau_threshold: 0.0001
   minimum_learning_rate: 0.000001
+
+specificity_finetuning:
+  enabled: true
+  model_subdirectory: model_specific_finetune
+  initialization_checkpoint: model/best_model.pt
+  gini_standard_deviations: 1.0
+  training:
+    epochs: 10
+    patience: 5
+    max_learning_rate: 0.00001
+    post_warmup_learning_rate: 0.00001
+    warmup_fraction: 0.0
+    post_warmup_decay_epochs: 0
+    plateau_patience: 2
+    minimum_learning_rate: 0.000001

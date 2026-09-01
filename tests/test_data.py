@@ -1,11 +1,14 @@
 import gzip
 
+import numpy as np
 import pytest
 import torch
 
 from enhancer_pleiotropy_model.data import (
     EpochShuffleSampler,
+    JointProfileDataset,
     JointProfileCollator,
+    WindowRecord,
     read_windows,
 )
 
@@ -90,3 +93,44 @@ def test_collator_builds_centered_target_masks():
     )
     assert batch["atac_target_mask"].sum().item() == 512
     assert batch["h3k27ac_target_mask"].sum().item() == 1536
+
+
+def test_joint_profile_dataset_subset_preserves_source_alignment():
+    records = [
+        WindowRecord(
+            identifier=str(index),
+            source="atac_peak_overlap",
+            chrom="chr2R",
+            start=0,
+            end=2048,
+            target_start=768,
+            target_end=1280,
+            block_id="train:chr2R:0",
+            split="train",
+            sequence=base * 2048,
+        )
+        for index, base in enumerate(("A", "C", "G"))
+    ]
+    atac = np.stack(
+        [np.full((32, 8), index, dtype=np.float32) for index in range(3)]
+    )
+    h3k27ac = np.stack(
+        [np.full((96, 8), index, dtype=np.float32) for index in range(3)]
+    )
+    dataset = JointProfileDataset(
+        records,
+        atac,
+        h3k27ac,
+        4,
+        training=False,
+        rc_probability=0,
+        seed=7,
+        indices=[2, 0],
+    )
+    first = dataset[0]
+    second = dataset[1]
+    assert len(dataset) == 2
+    assert first[0] == "G" * 2048
+    assert first[1].unique().item() == 2
+    assert first[2].unique().item() == 2
+    assert second[0] == "A" * 2048

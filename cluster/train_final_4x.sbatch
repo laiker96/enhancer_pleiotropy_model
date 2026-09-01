@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=enh_crested4x
+#SBATCH --job-name=enh_crestcurr
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -41,4 +41,9 @@ mkdir -p logs
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 srun --ntasks=1 .venv/bin/python -m enhancer_pleiotropy_model.training \
   --config "$config_path" \
+  --stage base \
+  --resume
+srun --ntasks=1 .venv/bin/python -m enhancer_pleiotropy_model.training \
+  --config "$config_path" \
+  --stage specificity \
   --resume
