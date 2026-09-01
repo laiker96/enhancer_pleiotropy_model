@@ -24,6 +24,7 @@ enhancer-build-profiles = "enhancer_pleiotropy_model.preprocessing.profiles:main
 enhancer-train = "enhancer_pleiotropy_model.training:main"
 enhancer-predict = "enhancer_pleiotropy_model.inference:main"
 enhancer-browser-tracks = "enhancer_pleiotropy_model.browser_tracks:main"
+enhancer-browser-report = "enhancer_pleiotropy_model.browser_report:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -158,6 +158,25 @@ The current local checkpoint was selected on chr2L validation. These browser
 tracks are therefore appropriate for qualitative model QC, not as an
 untouched test-set performance estimate.
 
+Generate the complete quantitative validation report reproducibly with:
+
+```bash
+XDG_CACHE_HOME="$PWD/.cache" .venv/bin/snakemake \
+  --configfile config/default.yaml \
+  --cores 4 \
+  --rerun-incomplete \
+  browser_validation_report \
+  --resources gpu=1
+```
+
+This target creates per-context accuracy metrics, tissue-pattern metrics,
+observed/predicted context-correlation matrices, target-PCA diagnostics,
+DHS/H3K27ac/background stratification, deterministic success/failure
+bookmarks, 16 signed residual BigWigs, a combined IGV session, and a
+self-contained `index.html`. Every quantitative input is SHA-256 hashed in
+`analysis_config.json`. Definitions and standalone commands are documented in
+[`docs/browser_validation.md`](docs/browser_validation.md).
+
 ## Training defaults
 
 - stochastic reverse complement with probability 0.5;

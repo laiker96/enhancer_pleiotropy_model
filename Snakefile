@@ -10,6 +10,21 @@ OUTPUT = config["output_directory"]
 PYTHON = ".venv/bin/python"
 CONTEXTS = config["contexts"]
 BIGWIG_DIRECTORY = config["inputs"]["bigwig_directory"]
+BROWSER_CONFIG = config["browser_tracks"]
+REPORT_CONFIG = config["browser_report"]
+BROWSER_DIRECTORY = f"{OUTPUT}/{BROWSER_CONFIG['subdirectory']}"
+REPORT_DIRECTORY = f"{OUTPUT}/{REPORT_CONFIG['subdirectory']}"
+BROWSER_TRACKS = [
+    f"{BROWSER_DIRECTORY}/{source}.{context}.{assay}.bw"
+    for source in ("observed", "predicted")
+    for assay in ("atac", "h3k27ac")
+    for context in CONTEXTS
+]
+RESIDUAL_TRACKS = [
+    f"{REPORT_DIRECTORY}/residuals/residual.{context}.{assay}.bw"
+    for assay in ("atac", "h3k27ac")
+    for context in CONTEXTS
+]
 
 
 def bigwigs(assay):
@@ -35,6 +50,13 @@ rule prepared_data:
         f"{OUTPUT}/data/profiles/h3k27ac/train_profiles.npy",
         f"{OUTPUT}/data/profiles/h3k27ac/validation_profiles.npy",
         f"{OUTPUT}/data/profiles/h3k27ac/test_profiles.npy",
+
+
+rule browser_validation_report:
+    input:
+        f"{REPORT_DIRECTORY}/index.html",
+        f"{REPORT_DIRECTORY}/metrics.json",
+        f"{REPORT_DIRECTORY}/igv_session_with_residuals.xml",
 
 
 rule resolved_config:
@@ -186,4 +208,99 @@ rule train:
         """
         {PYTHON} -m enhancer_pleiotropy_model.training \
           --config {input.config:q} --resume 2>&1 | tee {log:q}
+        """
+
+
+rule browser_tracks:
+    input:
+        checkpoint=f"{OUTPUT}/model/best_model.pt",
+        reference=config["inputs"]["reference_fasta"],
+        blacklist=config["inputs"]["blacklist_bed"],
+        observed=lambda wildcards: bigwigs("atac") + bigwigs("h3k27ac"),
+    output:
+        metadata=f"{BROWSER_DIRECTORY}/browser_tracks.metadata.json",
+        session=f"{BROWSER_DIRECTORY}/igv_session.xml",
+        tracks=BROWSER_TRACKS,
+    params:
+        output_directory=BROWSER_DIRECTORY,
+        bigwig_directory=BIGWIG_DIRECTORY,
+        chromosome=BROWSER_CONFIG["chromosome"],
+        region_start=BROWSER_CONFIG["region_start"],
+        region_end=BROWSER_CONFIG["region_end"],
+        stride=BROWSER_CONFIG["stride_bp"],
+        batch_size=BROWSER_CONFIG["batch_size"],
+        progress_every=BROWSER_CONFIG["progress_every_batches"],
+        checkpoint_every=BROWSER_CONFIG["checkpoint_every_batches"],
+        mixed_precision=BROWSER_CONFIG["mixed_precision"],
+        rc=(
+            ""
+            if BROWSER_CONFIG["reverse_complement_ensemble"]
+            else "--no-reverse-complement-ensemble"
+        ),
+    log:
+        "logs/browser_tracks.log",
+    threads: 4
+    resources:
+        gpu=1
+    shell:
+        """
+        {PYTHON} -m enhancer_pleiotropy_model.browser_tracks \
+          --checkpoint {input.checkpoint:q} \
+          --reference-fasta {input.reference:q} \
+          --blacklist-bed {input.blacklist:q} \
+          --observed-bigwig-directory {params.bigwig_directory:q} \
+          --output-directory {params.output_directory:q} \
+          --chromosome {params.chromosome:q} \
+          --region-start {params.region_start} \
+          --region-end {params.region_end} \
+          --stride {params.stride} \
+          --batch-size {params.batch_size} \
+          --progress-every-batches {params.progress_every} \
+          --checkpoint-every-batches {params.checkpoint_every} \
+          --device cuda \
+          --mixed-precision {params.mixed_precision:q} \
+          {params.rc} 2>&1 | tee {log:q}
+        """
+
+
+rule browser_report:
+    input:
+        metadata=f"{BROWSER_DIRECTORY}/browser_tracks.metadata.json",
+        tracks=BROWSER_TRACKS,
+        dhs=config["inputs"]["master_dhs_bed"],
+        h3=f"{OUTPUT}/data/h3k27ac_consensus_union.bed",
+    output:
+        report=f"{REPORT_DIRECTORY}/index.html",
+        metrics=f"{REPORT_DIRECTORY}/metrics.json",
+        config=f"{REPORT_DIRECTORY}/analysis_config.json",
+        per_context=f"{REPORT_DIRECTORY}/per_context_metrics.tsv",
+        stratified=f"{REPORT_DIRECTORY}/stratified_metrics.tsv",
+        representatives=f"{REPORT_DIRECTORY}/representative_loci.tsv",
+        bookmarks=f"{REPORT_DIRECTORY}/representative_loci.bed",
+        session=f"{REPORT_DIRECTORY}/igv_session_with_residuals.xml",
+        residuals=RESIDUAL_TRACKS,
+    params:
+        output_directory=REPORT_DIRECTORY,
+        active_quantile=REPORT_CONFIG["active_quantile"],
+        variable_quantile=REPORT_CONFIG["variable_quantile"],
+        representatives=REPORT_CONFIG["representatives_per_class"],
+        span=REPORT_CONFIG["representative_span_bp"],
+        separation=REPORT_CONFIG["minimum_separation_bp"],
+        seed=config["seed"],
+    log:
+        "logs/browser_report.log",
+    threads: 4
+    shell:
+        """
+        {PYTHON} -m enhancer_pleiotropy_model.browser_report \
+          --browser-metadata {input.metadata:q} \
+          --master-dhs-bed {input.dhs:q} \
+          --h3k27ac-peaks-bed {input.h3:q} \
+          --output-directory {params.output_directory:q} \
+          --active-quantile {params.active_quantile} \
+          --variable-quantile {params.variable_quantile} \
+          --representatives-per-class {params.representatives} \
+          --representative-span-bp {params.span} \
+          --minimum-separation-bp {params.separation} \
+          --seed {params.seed} 2>&1 | tee {log:q}
         """

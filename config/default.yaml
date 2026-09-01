@@ -38,6 +38,26 @@ inputs:
   h3k27ac_peak_directory: data/raw/peaks/h3k27ac
   bigwig_directory: data/raw/bigwig
 
+browser_tracks:
+  subdirectory: browser/chr2L_validation
+  chromosome: chr2L
+  region_start: 0
+  region_end: 11751856
+  stride_bp: 256
+  batch_size: 64
+  progress_every_batches: 50
+  checkpoint_every_batches: 50
+  mixed_precision: fp16
+  reverse_complement_ensemble: true
+
+browser_report:
+  subdirectory: browser/chr2L_validation/report
+  active_quantile: 0.90
+  variable_quantile: 0.75
+  representatives_per_class: 5
+  representative_span_bp: 10000
+  minimum_separation_bp: 100000
+
 output_directory: results/default_4x
 
 sampling:
