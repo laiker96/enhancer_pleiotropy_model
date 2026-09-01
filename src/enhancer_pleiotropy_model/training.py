@@ -61,6 +61,137 @@ class StandardizedLog1pHuberLoss(nn.Module):
         return torch.nn.functional.smooth_l1_loss(predicted, target, beta=1.0)
 
 
+class CrestedCosineMSELogLoss(nn.Module):
+    """PyTorch implementation of CREsted's CosineMSELogLoss.
+
+    Dense profiles are shaped ``[batch, bins, contexts]``. The logarithmic MSE
+    is reduced over all elements, while cosine similarity is calculated across
+    the context axis for every genomic bin and then averaged.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_weight: float = 100.0,
+        multiplier: float = 1.0,
+        minimum_target_norm: float = 0.0,
+    ) -> None:
+        super().__init__()
+        if max_weight < 1:
+            raise ValueError("CREsted max_weight must be at least 1")
+        if multiplier <= 0:
+            raise ValueError("CREsted multiplier must be positive")
+        if minimum_target_norm < 0:
+            raise ValueError("CREsted minimum_target_norm cannot be negative")
+        self.max_weight = float(max_weight)
+        self.multiplier = float(multiplier)
+        self.minimum_target_norm = float(minimum_target_norm)
+
+    def components(
+        self, predictions: torch.Tensor, labels: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        if predictions.shape != labels.shape or predictions.ndim != 3:
+            raise ValueError("CREsted loss expects aligned [batch, bins, contexts]")
+        predictions = predictions.float()
+        labels = labels.float()
+        transformed_predictions = torch.sign(predictions) * torch.log1p(
+            self.multiplier * predictions.abs()
+        )
+        transformed_labels = torch.log1p(self.multiplier * labels)
+        mse = torch.mean(torch.square(transformed_predictions - transformed_labels))
+        cosine_weight = mse.abs().clamp(1.0, self.max_weight)
+        normalized_predictions = torch.nn.functional.normalize(
+            predictions, dim=-1
+        )
+        normalized_labels = torch.nn.functional.normalize(labels, dim=-1)
+        cosine_similarity = torch.sum(
+            normalized_predictions * normalized_labels, dim=-1
+        )
+        if self.minimum_target_norm > 0:
+            eligible = (
+                torch.linalg.vector_norm(labels, dim=-1)
+                > self.minimum_target_norm
+            )
+            mean_cosine = (
+                cosine_similarity[eligible].mean()
+                if eligible.any()
+                else cosine_similarity.new_zeros(())
+            )
+        else:
+            mean_cosine = cosine_similarity.mean()
+        total = mse - cosine_weight * mean_cosine
+        return {
+            "mse": mse,
+            "cosine_similarity": mean_cosine,
+            "cosine_weight": cosine_weight,
+            "total": total,
+        }
+
+    def forward(self, predictions: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        return self.components(predictions, labels)["total"]
+
+
+def build_loss_criteria(
+    training: dict[str, Any],
+    h3_means: np.ndarray,
+    h3_standard_deviations: np.ndarray,
+    device: torch.device,
+) -> tuple[nn.Module, nn.Module, dict[str, Any]]:
+    loss_config = dict(training.get("loss", {}))
+    name = loss_config.get(
+        "name", "poisson_atac_standardized_log1p_huber_h3k27ac"
+    )
+    if name == "poisson_atac_standardized_log1p_huber_h3k27ac":
+        return (
+            nn.PoissonNLLLoss(log_input=False, full=False, eps=1e-8),
+            StandardizedLog1pHuberLoss(
+                h3_means, h3_standard_deviations
+            ).to(device),
+            {
+                "name": "ATAC raw Poisson NLL plus H3K27ac train-standardized log1p SmoothL1",
+                "main_loss": "poisson",
+                "h3k27ac_main_loss": "standardized_log1p_huber",
+                "h3k27ac_target_standardization": {
+                    "transform": "log1p then per-context mean/std standardization",
+                    "fit_split": "train",
+                    "means": h3_means.tolist(),
+                    "standard_deviations": h3_standard_deviations.tolist(),
+                },
+            },
+        )
+    if name != "crested_cosine_mse_log_both":
+        raise ValueError(f"Unsupported training loss: {name}")
+    max_weight = float(loss_config.get("max_weight", 100.0))
+    minimum_target_norm = float(loss_config.get("minimum_target_norm", 0.0))
+    multipliers = dict(loss_config.get("multipliers", {}))
+    expected = set(ASSAYS)
+    if set(multipliers) != expected:
+        raise ValueError(f"CREsted multipliers must be provided for {sorted(expected)}")
+    criteria = {
+        assay: CrestedCosineMSELogLoss(
+            max_weight=max_weight,
+            multiplier=float(multipliers[assay]),
+            minimum_target_norm=minimum_target_norm,
+        ).to(device)
+        for assay in ASSAYS
+    }
+    metadata = {
+        "name": "CREsted CosineMSELogLoss applied independently to ATAC and H3K27ac",
+        "main_loss": "crested_cosine_mse_log",
+        "h3k27ac_main_loss": "crested_cosine_mse_log",
+        "implementation": "PyTorch port of aertslab/CREsted CosineMSELogLoss",
+        "assay_reduction": "unweighted sum of independently reduced assay losses",
+        "context_axis": -1,
+        "max_weight": max_weight,
+        "minimum_target_norm": minimum_target_norm,
+        "multipliers": {assay: float(multipliers[assay]) for assay in ASSAYS},
+        "mse": "global mean squared error after signed log1p(multiplier * signal)",
+        "cosine": "negative mean raw-signal cosine similarity across contexts per genomic bin",
+        "dynamic_weight": "clamp(absolute log-MSE, 1, max_weight)",
+    }
+    return criteria["atac"], criteria["h3k27ac"], metadata
+
+
 class WarmupPlateauScheduler:
     """Linear warmup, cosine transition, then validation-driven reductions."""
 
@@ -239,9 +370,26 @@ def calculate_losses(
     atac_criterion: nn.Module,
     h3_criterion: nn.Module,
 ) -> dict[str, torch.Tensor]:
-    atac = atac_criterion(predictions[0].float(), labels[0].float())
-    h3k27ac = h3_criterion(predictions[1].float(), labels[1].float())
-    return {"atac": atac, "h3k27ac": h3k27ac, "total": atac + h3k27ac}
+    losses: dict[str, torch.Tensor] = {}
+    assay_totals = []
+    for assay, prediction, target, criterion in zip(
+        ASSAYS,
+        predictions,
+        labels,
+        (atac_criterion, h3_criterion),
+        strict=True,
+    ):
+        if isinstance(criterion, CrestedCosineMSELogLoss):
+            components = criterion.components(prediction.float(), target.float())
+            assay_total = components["total"]
+            for name in ("mse", "cosine_similarity", "cosine_weight"):
+                losses[f"{assay}_{name}"] = components[name]
+        else:
+            assay_total = criterion(prediction.float(), target.float())
+        losses[assay] = assay_total
+        assay_totals.append(assay_total)
+    losses["total"] = sum(assay_totals)
+    return losses
 
 
 @torch.no_grad()
@@ -256,7 +404,7 @@ def evaluate(
     maximum_batches: int | None = None,
 ) -> tuple[dict[str, float], dict[str, np.ndarray], dict[str, np.ndarray]]:
     model.eval()
-    loss_sums = {"atac": 0.0, "h3k27ac": 0.0, "total": 0.0}
+    loss_sums: dict[str, float] = {}
     count = 0
     labels_all = {assay: [] for assay in ASSAYS}
     predictions_all = {assay: [] for assay in ASSAYS}
@@ -286,7 +434,9 @@ def evaluate(
         batch_count = len(atac_labels)
         count += batch_count
         for name, value in losses.items():
-            loss_sums[name] += float(value.item()) * batch_count
+            loss_sums[name] = loss_sums.get(name, 0.0) + (
+                float(value.item()) * batch_count
+            )
         for assay, target, prediction in zip(
             ASSAYS,
             (atac_labels, h3_labels),
@@ -528,10 +678,9 @@ def main() -> None:
         h3k27ac_output_pool_size=h3_pool_size,
     ).to(device)
     model.initialize_output_means(target_means["atac"], target_means["h3k27ac"])
-    atac_criterion = nn.PoissonNLLLoss(log_input=False, full=False, eps=1e-8)
-    h3_criterion = StandardizedLog1pHuberLoss(
-        h3_means, h3_standard_deviations
-    ).to(device)
+    atac_criterion, h3_criterion, loss_metadata = build_loss_criteria(
+        training, h3_means, h3_standard_deviations, device
+    )
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(training["max_learning_rate"]),
@@ -615,6 +764,7 @@ def main() -> None:
                 "batches_per_epoch": batches_per_epoch,
                 "warmup_steps": warmup_steps,
                 "decay_steps": decay_steps,
+                "loss": loss_metadata,
                 "target_shapes": {
                     "atac": [int(atac_metadata["bins_per_target"]), len(contexts)],
                     "h3k27ac": [int(h3_metadata["bins_per_target"]) // h3_pool_size, len(contexts)],
@@ -670,7 +820,9 @@ def main() -> None:
             example_count = len(atac_labels)
             running_examples += example_count
             for name, value in losses.items():
-                running_sums[name] += float(value.item()) * example_count
+                running_sums[name] = running_sums.get(name, 0.0) + (
+                    float(value.item()) * example_count
+                )
             if absolute_batch % 100 == 0 or absolute_batch == batches_per_epoch:
                 print(
                     json.dumps(
@@ -772,17 +924,7 @@ def main() -> None:
                         "metric": "scientific_composite",
                         "score": best_score,
                     },
-                    "loss": {
-                        "name": "ATAC raw Poisson NLL plus H3K27ac train-standardized log1p SmoothL1",
-                        "main_loss": "poisson",
-                        "h3k27ac_main_loss": "standardized_log1p_huber",
-                        "h3k27ac_target_standardization": {
-                            "transform": "log1p then per-context mean/std standardization",
-                            "fit_split": "train",
-                            "means": h3_means.tolist(),
-                            "standard_deviations": h3_standard_deviations.tolist(),
-                        },
-                    },
+                    "loss": loss_metadata,
                     "training_target_means": {
                         assay: values.tolist() for assay, values in target_means.items()
                     },

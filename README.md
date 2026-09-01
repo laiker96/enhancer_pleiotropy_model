@@ -181,14 +181,23 @@ self-contained `index.html`. Every quantitative input is SHA-256 hashed in
 
 - stochastic reverse complement with probability 0.5;
 - forward/RC ensemble for validation;
-- ATAC raw Poisson NLL;
-- H3K27ac train-standardized log1p SmoothL1;
+- the reusable default configuration keeps ATAC raw Poisson NLL and H3K27ac
+  train-standardized log1p SmoothL1;
+- the final 40-epoch experiment in `config/final_4x.yaml` instead applies
+  CREsted `CosineMSELogLoss` independently to both assays, with cosine
+  similarity calculated across the eight contexts at each output bin;
 - AdamW with weight decay 0.01;
 - linear warmup to `1e-4`; the final configuration uses a four-epoch cosine
   transition to `5e-5` before plateau scheduling;
 - validation-plateau reduction by 0.5 after three epochs;
 - scientific checkpoint score combining window and tissue-pattern Pearson;
 - restartable batch and epoch checkpoints.
+
+For CREsted runs, training and validation logs separately report each assay's
+log-MSE, mean context-vector cosine similarity, dynamic cosine weight, and
+combined loss. The checkpoint records the exact loss configuration and
+multipliers. The loss change does not alter the prepared data or chromosome
+splits.
 
 The test chromosome is excluded from training and validation and is evaluated
 only after model and analysis choices are frozen.

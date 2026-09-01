@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=enh_final4x
+#SBATCH --job-name=enh_crested4x
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

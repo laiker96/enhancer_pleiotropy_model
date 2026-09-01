@@ -24,6 +24,13 @@ region_splits:
   test: []
 
 training:
+  loss:
+    name: crested_cosine_mse_log_both
+    max_weight: 100.0
+    minimum_target_norm: 0.0
+    multipliers:
+      atac: 1.0
+      h3k27ac: 1.0
   epochs: 40
   patience: 40
   warmup_fraction: 0.025
