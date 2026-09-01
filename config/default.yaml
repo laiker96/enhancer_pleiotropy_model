@@ -1,0 +1,75 @@
+seed: 20260829
+
+contexts:
+  - ab
+  - e13
+  - e5
+  - ead
+  - hid
+  - lb
+  - o
+  - wid
+
+chromosome_splits:
+  train:
+    - chr2R
+    - chr3L
+    - chr3R
+    - chr4
+    - chrUn_CP007081v1
+    - chrUn_CP007120v1
+    - chrY
+  validation:
+    - chr2L
+  test:
+    - chrX
+
+inputs:
+  reference_fasta: data/raw/reference/dm6.fa
+  blacklist_bed: data/raw/reference/dm6.blacklist.bed
+  master_dhs_bed: data/raw/peaks/master_dhs.bed
+  master_dhs_summits_bed: data/raw/peaks/master_dhs_summits.bed
+  h3k27ac_peak_directory: data/raw/peaks/h3k27ac
+  bigwig_directory: data/raw/bigwig
+
+output_directory: results/default_4x
+
+sampling:
+  central_target_bp: 512
+  context_flank_bp: 768
+  training_stride_bp: 128
+  validation_stride_bp: 256
+  block_size_bp: 1000000
+  background_to_peak_ratio: 1.0
+
+profiles:
+  source_bin_bp: 16
+  atac_target_bp: 512
+  h3k27ac_target_bp: 1536
+  h3k27ac_output_pool_size: 4
+
+model:
+  preset: 4x
+  dropout: 0.1
+  head_dropout: 0.1
+
+training:
+  epochs: 30
+  patience: 30
+  batch_size: 64
+  evaluation_batch_size: 64
+  num_workers: 0
+  max_learning_rate: 0.0001
+  post_warmup_learning_rate: 0.00005
+  warmup_fraction: 0.0333333333333333
+  plateau_factor: 0.5
+  plateau_patience: 3
+  plateau_threshold: 0.0001
+  minimum_learning_rate: 0.000001
+  weight_decay: 0.01
+  stochastic_rc_probability: 0.5
+  validation_rc_ensemble: true
+  checkpoint_every_batches: 500
+  gradient_clip_norm: 1.0
+  mixed_precision: fp16
+  device: cuda

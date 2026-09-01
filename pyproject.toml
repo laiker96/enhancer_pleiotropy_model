@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enhancer-pleiotropy-model"
+version = "0.1.0"
+description = "Train and load a multi-context Drosophila ATAC/H3K27ac sequence model"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "numpy>=2.1,<2.3",
+  "pandas>=2.2,<2.4",
+  "pyBigWig>=0.3.24,<0.4",
+  "PyYAML>=6.0,<7",
+  "scipy>=1.14,<1.16",
+  "torch>=2.5,<2.6",
+]
+
+[project.scripts]
+enhancer-build-h3-consensus = "enhancer_pleiotropy_model.preprocessing.h3_peaks:main"
+enhancer-build-windows = "enhancer_pleiotropy_model.preprocessing.windows:main"
+enhancer-build-profiles = "enhancer_pleiotropy_model.preprocessing.profiles:main"
+enhancer-train = "enhancer_pleiotropy_model.training:main"
+enhancer-predict = "enhancer_pleiotropy_model.inference:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
