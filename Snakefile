@@ -165,7 +165,6 @@ rule train:
         h3_metadata=f"{OUTPUT}/data/profiles/h3k27ac/profiles.metadata.json",
     output:
         best=f"{OUTPUT}/model/best_model.pt",
-        last=f"{OUTPUT}/model/last_checkpoint.pt",
         metrics=f"{OUTPUT}/model/metrics.json",
     log:
         f"logs/train_4x.log",
