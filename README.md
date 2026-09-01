@@ -91,12 +91,17 @@ tmux new -d -s enhancer_pleiotropy_train \
 tail -f logs/train.log
 ```
 
-The Slurm launcher in `cluster/` rejects the login node and submits the
-Snakemake workflow to a compute node:
+The Slurm launchers in `cluster/` reject the login node. For the final run,
+first create the repository-local environment on a CPU compute node, then
+submit training with an `afterok` dependency:
 
 ```bash
-sbatch cluster/train_default.sbatch
+environment_job=$(sbatch --parsable cluster/setup_environment.sbatch)
+sbatch --dependency="afterok:${environment_job}" cluster/train_final_4x.sbatch
 ```
+
+The final training launcher calls the restartable trainer directly, so raw
+BigWigs are not needed on the GPU node once prepared arrays have been copied.
 
 ## Load a checkpoint
 
