@@ -1,0 +1,36 @@
+seed: 20260829
+
+output_directory: results/final_4x_chr2l_halfval_chr3r_test
+split_strategy: regions
+
+chromosome_splits:
+  train:
+    - chrX
+    - chr2R
+    - chr3L
+    - chr4
+    - chrUn_CP007081v1
+    - chrUn_CP007120v1
+    - chrY
+  validation: []
+  test:
+    - chr3R
+
+region_splits:
+  train:
+    - chr2L:11761856-23513712
+  validation:
+    - chr2L:0-11751856
+  test: []
+
+training:
+  epochs: 40
+  patience: 40
+  warmup_fraction: 0.025
+  post_warmup_decay_epochs: 4
+  max_learning_rate: 0.0001
+  post_warmup_learning_rate: 0.00005
+  plateau_factor: 0.5
+  plateau_patience: 3
+  plateau_threshold: 0.0001
+  minimum_learning_rate: 0.000001

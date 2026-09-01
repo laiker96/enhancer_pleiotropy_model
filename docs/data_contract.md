@@ -22,12 +22,25 @@ used for sampling.
 
 Every retained central 512-bp target is expanded by 768 bp on each side, giving
 a 2,048-bp input. Complete peak-overlapping windows and an equal number of
-background windows are retained independently in training and validation.
+background windows are retained independently in training, validation, and
+test.
 Blacklisted, ambiguous, duplicate, out-of-chromosome, and cross-split windows
 are rejected.
 
-The chromosome split is configured explicitly and validated as disjoint. Test
-chromosomes do not enter the prepared training or validation arrays.
+Whole-chromosome and interval splits are configured explicitly. Their complete
+2,048-bp input intervals are validated as non-overlapping. Test labels are
+prepared for one frozen post-training evaluation, but the training loop never
+loads a test data loader and never uses test metrics for checkpoint or
+learning-rate decisions.
+
+`config/final_4x.yaml` excludes a 10-kb buffer around the chr2L midpoint:
+
+```text
+validation  chr2L:0-11,751,856
+buffer      chr2L:11,751,856-11,761,856
+training    chr2L:11,761,856-23,513,712
+test        chr3R (entire chromosome)
+```
 
 Each generated table and profile array has JSON metadata with input hashes,
 contexts, shape, target geometry, split counts, and summary statistics.

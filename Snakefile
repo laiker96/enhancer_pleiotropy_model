@@ -31,8 +31,10 @@ rule prepared_data:
         f"{OUTPUT}/data/windows.metadata.json",
         f"{OUTPUT}/data/profiles/atac/train_profiles.npy",
         f"{OUTPUT}/data/profiles/atac/validation_profiles.npy",
+        f"{OUTPUT}/data/profiles/atac/test_profiles.npy",
         f"{OUTPUT}/data/profiles/h3k27ac/train_profiles.npy",
         f"{OUTPUT}/data/profiles/h3k27ac/validation_profiles.npy",
+        f"{OUTPUT}/data/profiles/h3k27ac/test_profiles.npy",
 
 
 rule resolved_config:
@@ -83,6 +85,10 @@ rule windows:
         train=" ".join(config["chromosome_splits"]["train"]),
         validation=" ".join(config["chromosome_splits"]["validation"]),
         test=" ".join(config["chromosome_splits"]["test"]),
+        train_regions=" ".join(config.get("region_splits", {}).get("train", [])),
+        validation_regions=" ".join(config.get("region_splits", {}).get("validation", [])),
+        test_regions=" ".join(config.get("region_splits", {}).get("test", [])),
+        split_strategy=config.get("split_strategy", "chromosome"),
         target=config["sampling"]["central_target_bp"],
         flank=config["sampling"]["context_flank_bp"],
         train_stride=config["sampling"]["training_stride_bp"],
@@ -106,13 +112,16 @@ rule windows:
           --context-flank-size {params.flank} \
           --stride {params.train_stride} \
           --validation-stride {params.validation_stride} \
-          --split-strategy chromosome \
+          --split-strategy {params.split_strategy} \
           --block-size {params.block} \
           --background-to-peak-ratio {params.background_ratio} \
           --seed {params.seed} \
           --train-chromosomes {params.train} \
           --validation-chromosomes {params.validation} \
           --test-chromosomes {params.test} \
+          --train-regions {params.train_regions} \
+          --validation-regions {params.validation_regions} \
+          --test-regions {params.test_regions} \
           --output {output.table:q} \
           --metadata {output.metadata:q} 2>&1 | tee {log:q}
         """
@@ -125,6 +134,7 @@ rule profiles:
     output:
         train=f"{OUTPUT}/data/profiles/{{assay}}/train_profiles.npy",
         validation=f"{OUTPUT}/data/profiles/{{assay}}/validation_profiles.npy",
+        test=f"{OUTPUT}/data/profiles/{{assay}}/test_profiles.npy",
         metadata=f"{OUTPUT}/data/profiles/{{assay}}/profiles.metadata.json",
     params:
         bigwig_directory=BIGWIG_DIRECTORY,
@@ -159,9 +169,11 @@ rule train:
         dataset=f"{OUTPUT}/data/windows.tsv.gz",
         atac_train=f"{OUTPUT}/data/profiles/atac/train_profiles.npy",
         atac_validation=f"{OUTPUT}/data/profiles/atac/validation_profiles.npy",
+        atac_test=f"{OUTPUT}/data/profiles/atac/test_profiles.npy",
         atac_metadata=f"{OUTPUT}/data/profiles/atac/profiles.metadata.json",
         h3_train=f"{OUTPUT}/data/profiles/h3k27ac/train_profiles.npy",
         h3_validation=f"{OUTPUT}/data/profiles/h3k27ac/validation_profiles.npy",
+        h3_test=f"{OUTPUT}/data/profiles/h3k27ac/test_profiles.npy",
         h3_metadata=f"{OUTPUT}/data/profiles/h3k27ac/profiles.metadata.json",
     output:
         best=f"{OUTPUT}/model/best_model.pt",

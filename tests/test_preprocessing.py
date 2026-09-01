@@ -10,6 +10,11 @@ from enhancer_pleiotropy_model.preprocessing.h3_peaks import (
     replicate_supported_intervals,
 )
 from enhancer_pleiotropy_model.preprocessing.profiles import binned_means
+from enhancer_pleiotropy_model.preprocessing.windows import (
+    build_split_regions,
+    containing_split,
+    parse_region,
+)
 
 
 def test_interval_merge_and_replicate_support():
@@ -66,3 +71,20 @@ def test_bigwig_profile_bins_are_exact_means(tmp_path):
         )
     expected = np.asarray([[1.5, 5.5], [5.5, 9.5]], dtype=np.float32)
     np.testing.assert_allclose(observed, expected)
+
+
+def test_region_split_requires_complete_input_containment():
+    genome = {"chr2L": "A" * 100, "chr3R": "A" * 80}
+    regions = build_split_regions(
+        genome,
+        {"train": set(), "validation": set(), "test": {"chr3R"}},
+        {
+            "train": ["chr2L:50-100"],
+            "validation": ["chr2L:0-50"],
+            "test": [],
+        },
+    )
+    assert parse_region("chr2L:50-100") == ("chr2L", 50, 100)
+    assert containing_split(regions, "chr2L", 10, 40) == "validation"
+    assert containing_split(regions, "chr2L", 60, 90) == "train"
+    assert containing_split(regions, "chr2L", 40, 60) is None

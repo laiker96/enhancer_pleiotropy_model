@@ -18,7 +18,7 @@ from .io import open_text, sha256_file
 from .sequence import one_hot_batch, reverse_complement
 
 
-SPLITS = ("train", "validation")
+SPLITS = ("train", "validation", "test")
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,8 @@ def read_windows(path: Path) -> dict[str, list[WindowRecord]]:
         "split",
         "sequence",
     }
-    chromosome_splits: dict[str, str] = {}
     block_splits: dict[str, str] = {}
+    genomic_intervals: dict[str, list[tuple[int, int, str]]] = {}
     identifiers: set[str] = set()
     with open_text(path) as handle:
         reader = csv.DictReader(handle, delimiter="\t")
@@ -79,12 +79,10 @@ def read_windows(path: Path) -> dict[str, list[WindowRecord]]:
                 raise ValueError(
                     f"{path}:{line_number}: ATAC target is not centered in the sequence"
                 )
-            previous = chromosome_splits.setdefault(row["chrom"], split)
-            if previous != split:
-                raise ValueError(f"Chromosome {row['chrom']} occurs in multiple splits")
             previous = block_splits.setdefault(row["block_id"], split)
             if previous != split:
                 raise ValueError(f"Block {row['block_id']} occurs in multiple splits")
+            genomic_intervals.setdefault(row["chrom"], []).append((start, end, split))
             records[split].append(
                 WindowRecord(
                     identifier=identifier,
@@ -100,7 +98,19 @@ def read_windows(path: Path) -> dict[str, list[WindowRecord]]:
                 )
             )
     if any(not values for values in records.values()):
-        raise ValueError("Training and validation splits must be non-empty")
+        raise ValueError("Training, validation, and test splits must be non-empty")
+    for chrom, intervals in genomic_intervals.items():
+        maximum_end_by_split = {split: -1 for split in SPLITS}
+        for start, end, split in sorted(intervals):
+            if any(
+                maximum_end_by_split[other_split] > start
+                for other_split in SPLITS
+                if other_split != split
+            ):
+                raise ValueError(
+                    f"Input windows from different splits overlap on {chrom}"
+                )
+            maximum_end_by_split[split] = max(maximum_end_by_split[split], end)
     sequence_lengths = {
         len(record.sequence) for values in records.values() for record in values
     }

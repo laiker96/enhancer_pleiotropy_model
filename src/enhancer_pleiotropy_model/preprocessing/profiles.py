@@ -18,7 +18,7 @@ from ..constants import CONTEXTS
 from ..io import atomic_write_json, sha256_file
 
 
-VALID_SPLITS = ("train", "validation")
+VALID_SPLITS = ("train", "validation", "test")
 
 
 def parse_args() -> argparse.Namespace:

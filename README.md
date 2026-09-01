@@ -72,6 +72,16 @@ Run preprocessing on CPU:
 .venv/bin/snakemake --configfile config/default.yaml --cores 4 prepared_data
 ```
 
+The final 40-epoch run uses `config/final_4x.yaml`. It trains on chrX, chr2R,
+chr3L, chr4, chrY, the two configured unplaced scaffolds, and the right half of
+chr2L. The left half of chr2L is validation and chr3R is test. A 10-kb gap is
+excluded around the chr2L midpoint, and every complete 2,048-bp input must fit
+inside one split.
+
+```bash
+.venv/bin/snakemake --configfile config/final_4x.yaml --cores 4 prepared_data
+```
+
 Run the complete workflow on a CUDA host:
 
 ```bash
@@ -118,7 +128,8 @@ expect 2,048 unambiguous A/C/G/T bases.
 - ATAC raw Poisson NLL;
 - H3K27ac train-standardized log1p SmoothL1;
 - AdamW with weight decay 0.01;
-- linear warmup to `1e-4`, then `5e-5`;
+- linear warmup to `1e-4`; the final configuration uses a four-epoch cosine
+  transition to `5e-5` before plateau scheduling;
 - validation-plateau reduction by 0.5 after three epochs;
 - scientific checkpoint score combining window and tissue-pattern Pearson;
 - restartable batch and epoch checkpoints.

@@ -37,6 +37,7 @@ REGULATORY_SOURCES = frozenset(
 SIGNAL_PREFIX = "atac_signal_"
 SUPPORTED_SIGNAL_ASSAYS = ("atac", "h3k27ac")
 DNA_ALPHABET = frozenset("ACGT")
+SPLITS = ("train", "validation", "test")
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--split-strategy",
-        choices=("blocked", "chromosome"),
+        choices=("blocked", "chromosome", "regions"),
         default="blocked",
         help=(
             "Use hashed blocks within supervised training chromosomes or the "
@@ -95,10 +96,82 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-fraction", type=float, default=0.05)
     parser.add_argument("--background-to-peak-ratio", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=20260813)
-    parser.add_argument("--train-chromosomes", nargs="+", required=True)
-    parser.add_argument("--validation-chromosomes", nargs="+", required=True)
-    parser.add_argument("--test-chromosomes", nargs="+", default=[])
+    parser.add_argument("--train-chromosomes", nargs="*", default=[])
+    parser.add_argument("--validation-chromosomes", nargs="*", default=[])
+    parser.add_argument("--test-chromosomes", nargs="*", default=[])
+    for split in SPLITS:
+        parser.add_argument(
+            f"--{split}-regions",
+            nargs="*",
+            default=[],
+            metavar="CHROM:START-END",
+        )
     return parser.parse_args()
+
+
+def parse_region(value: str) -> tuple[str, int, int]:
+    try:
+        chrom, coordinates = value.rsplit(":", 1)
+        start_text, end_text = coordinates.split("-", 1)
+        start, end = int(start_text), int(end_text)
+    except (ValueError, TypeError) as error:
+        raise ValueError(
+            f"Invalid region {value!r}; expected CHROM:START-END"
+        ) from error
+    if not chrom or start < 0 or end <= start:
+        raise ValueError(f"Invalid region {value!r}")
+    return chrom, start, end
+
+
+def build_split_regions(
+    genome: dict[str, str],
+    chromosome_splits: dict[str, set[str]],
+    region_values: dict[str, list[str]],
+) -> dict[str, list[tuple[int, int, str]]]:
+    """Resolve full chromosomes and intervals into disjoint split regions."""
+    regions: dict[str, list[tuple[int, int, str]]] = {}
+    for split in SPLITS:
+        for chrom in chromosome_splits[split]:
+            if chrom not in genome:
+                raise ValueError(f"Reference FASTA lacks chromosome {chrom}")
+            regions.setdefault(chrom, []).append((0, len(genome[chrom]), split))
+        for value in region_values[split]:
+            chrom, start, end = parse_region(value)
+            if chrom not in genome:
+                raise ValueError(f"Reference FASTA lacks chromosome {chrom}")
+            if end > len(genome[chrom]):
+                raise ValueError(
+                    f"Region {value!r} exceeds chromosome length {len(genome[chrom])}"
+                )
+            regions.setdefault(chrom, []).append((start, end, split))
+
+    split_counts = {split: 0 for split in SPLITS}
+    for chrom, chrom_regions in regions.items():
+        previous_end = -1
+        for start, end, split in sorted(chrom_regions):
+            if start < previous_end:
+                raise ValueError(f"Split regions overlap on {chrom}")
+            previous_end = end
+            split_counts[split] += 1
+    if any(count == 0 for count in split_counts.values()):
+        raise ValueError(f"Train, validation, and test regions are required: {split_counts}")
+    return regions
+
+
+def containing_split(
+    regions: dict[str, list[tuple[int, int, str]]],
+    chrom: str,
+    start: int,
+    end: int,
+) -> str | None:
+    matches = [
+        split
+        for region_start, region_end, split in regions.get(chrom, ())
+        if region_start <= start and end <= region_end
+    ]
+    if len(matches) > 1:
+        raise ValueError(f"Input interval {chrom}:{start}-{end} belongs to multiple splits")
+    return matches[0] if matches else None
 
 
 def block_is_validation(
@@ -120,7 +193,7 @@ def select_balanced_windows(
 ) -> tuple[list[CandidateWindow], dict[str, dict[str, int]]]:
     selected: list[CandidateWindow] = []
     counts: dict[str, dict[str, int]] = {}
-    for split_index, split in enumerate(("train", "validation")):
+    for split_index, split in enumerate(SPLITS):
         peaks = [
             window
             for window in candidates
@@ -302,7 +375,14 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
         "validation": set(args.validation_chromosomes),
         "test": set(args.test_chromosomes),
     }
-    if any(not values for key, values in chromosome_splits.items() if key != "test"):
+    region_values = {
+        split: list(getattr(args, f"{split}_regions", ())) for split in SPLITS
+    }
+    if split_strategy != "regions" and any(region_values.values()):
+        raise ValueError("Explicit regions require --split-strategy regions")
+    if split_strategy != "regions" and any(
+        not values for key, values in chromosome_splits.items() if key != "test"
+    ):
         raise ValueError("Training and validation chromosome sets must be non-empty")
     if (
         chromosome_splits["train"] & chromosome_splits["validation"]
@@ -310,12 +390,23 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
         or chromosome_splits["validation"] & chromosome_splits["test"]
     ):
         raise ValueError("Chromosome splits must be disjoint")
+    genome, chromosome_order = read_fasta(args.reference_fasta)
+    split_regions = (
+        build_split_regions(genome, chromosome_splits, region_values)
+        if split_strategy == "regions"
+        else {}
+    )
     training_chromosomes = chromosome_splits["train"]
     validation_chromosomes = (
         chromosome_splits["validation"] if split_strategy == "chromosome" else set()
     )
-    allowed_chromosomes = training_chromosomes | validation_chromosomes
-    genome, chromosome_order = read_fasta(args.reference_fasta)
+    allowed_chromosomes = (
+        set(split_regions)
+        if split_strategy == "regions"
+        else training_chromosomes
+        | validation_chromosomes
+        | chromosome_splits["test"]
+    )
     missing_reference = allowed_chromosomes - set(genome)
     if missing_reference:
         raise ValueError(f"Reference FASTA lacks chromosomes: {sorted(missing_reference)}")
@@ -380,6 +471,7 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
         skipped = {
             "crosses_chromosome_boundary": 0,
             "crosses_block_boundary": 0,
+            "crosses_split_boundary_or_unassigned": 0,
             "blacklist_overlap": 0,
             "ambiguous_sequence": 0,
             "duplicate_coordinate": 0,
@@ -392,6 +484,14 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
             input_end = target_end + context_flank_size
             if input_start < 0 or input_end > len(chromosome_sequence):
                 skipped["crosses_chromosome_boundary"] += 1
+                return
+            region_split = (
+                containing_split(split_regions, chrom, input_start, input_end)
+                if split_strategy == "regions"
+                else None
+            )
+            if split_strategy == "regions" and region_split is None:
+                skipped["crosses_split_boundary_or_unassigned"] += 1
                 return
             block_index = target_start // args.block_size
             block_start = block_index * args.block_size
@@ -422,17 +522,21 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
             if set(sequence) - DNA_ALPHABET:
                 skipped["ambiguous_sequence"] += 1
                 return
-            split = (
-                "validation"
-                if (
-                    chrom in validation_chromosomes
-                    if split_strategy == "chromosome"
-                    else block_is_validation(
+            if split_strategy == "regions":
+                split = region_split
+            elif chrom in chromosome_splits["test"]:
+                split = "test"
+            elif split_strategy == "chromosome":
+                split = "validation" if chrom in validation_chromosomes else "train"
+            else:
+                split = (
+                    "validation"
+                    if block_is_validation(
                         chrom, block_index, args.seed, args.validation_fraction
                     )
+                    else "train"
                 )
-                else "train"
-            )
+            assert split is not None
             atac_index = master_dhs.get(chrom)
             h3k27ac_index = h3k27ac_peaks.get(chrom)
             atac_overlap = atac_index is not None and atac_index.overlaps(
@@ -456,7 +560,7 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
                 target_start=target_start,
                 target_end=target_end,
                 split=split,
-                block_id=f"{chrom}:{block_index}",
+                block_id=f"{split}:{chrom}:{block_index}",
                 source=source,
                 sampling=sampling,
             )
@@ -466,15 +570,31 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
                 continue
             chromosome_sequence = genome[chrom]
             chromosome_stride = (
-                validation_stride
-                if split_strategy == "chromosome" and chrom in validation_chromosomes
-                else args.stride
+                math.gcd(args.stride, validation_stride)
+                if split_strategy == "regions"
+                else (
+                    validation_stride
+                    if chrom in validation_chromosomes
+                    or chrom in chromosome_splits["test"]
+                    else args.stride
+                )
             )
             for target_start in range(
                 0,
                 len(chromosome_sequence) - args.window_size + 1,
                 chromosome_stride,
             ):
+                if split_strategy == "regions":
+                    input_start = target_start - context_flank_size
+                    input_end = target_start + args.window_size + context_flank_size
+                    split = containing_split(
+                        split_regions, chrom, input_start, input_end
+                    )
+                    desired_stride = (
+                        args.stride if split == "train" else validation_stride
+                    )
+                    if split is None or target_start % desired_stride:
+                        continue
                 add_candidate(chrom, target_start, "sliding_grid")
             for summit_start, _summit_end in master_dhs_summits.get(chrom, []):
                 add_candidate(
@@ -506,7 +626,7 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
                 source: 0
                 for source in sorted(REGULATORY_SOURCES | {BACKGROUND_SOURCE})
             }
-            for split in ("train", "validation")
+            for split in SPLITS
         }
         signal_summary = {
             split: {
@@ -618,7 +738,9 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
 
     metadata: dict[str, object] = {
         "method": (
-            "chromosome_validation_peak_enriched_epigenomic_signal_v3_central_target"
+            "region_split_peak_enriched_epigenomic_signal_v4_central_target"
+            if split_strategy == "regions"
+            else "chromosome_validation_peak_enriched_epigenomic_signal_v3_central_target"
             if split_strategy == "chromosome"
             and (h3k27ac_peaks_bed is not None or master_dhs_summits_bed is not None)
             else (
@@ -659,7 +781,7 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
                 )
                 for sampling in sorted({window.sampling for window in candidates})
             }
-            for split in ("train", "validation")
+            for split in SPLITS
         },
         "signal_summary": signal_summary,
         "target_definition": (
@@ -672,7 +794,9 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
             "pretraining_validation_chromosomes": sorted(validation_chromosomes),
             "excluded_supervised_test_chromosomes": sorted(chromosome_splits["test"]),
             "pretraining_validation_partition": (
-                "supervised chromosome validation split; no validation chromosome occurs in training"
+                "explicit disjoint genomic regions; complete input windows crossing a region boundary are excluded"
+                if split_strategy == "regions"
+                else "supervised chromosome validation split; no validation chromosome occurs in training"
                 if split_strategy == "chromosome"
                 else (
                     "deterministically hashed genomic blocks; complete input-context windows crossing "
@@ -691,6 +815,7 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
                 split: sorted(chromosomes)
                 for split, chromosomes in chromosome_splits.items()
             },
+            "region_splits": region_values,
             "reference_fasta": {
                 "path": str(args.reference_fasta),
                 "sha256": sha256_file(args.reference_fasta),

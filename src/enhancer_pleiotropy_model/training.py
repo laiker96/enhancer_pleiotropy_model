@@ -62,7 +62,7 @@ class StandardizedLog1pHuberLoss(nn.Module):
 
 
 class WarmupPlateauScheduler:
-    """Linear per-step warmup followed by validation-driven reductions."""
+    """Linear warmup, cosine transition, then validation-driven reductions."""
 
     def __init__(
         self,
@@ -70,6 +70,7 @@ class WarmupPlateauScheduler:
         maximum_learning_rate: float,
         post_warmup_learning_rate: float,
         warmup_steps: int,
+        decay_steps: int,
         plateau_factor: float,
         plateau_patience: int,
         plateau_threshold: float,
@@ -79,6 +80,8 @@ class WarmupPlateauScheduler:
         self.maximum_learning_rate = maximum_learning_rate
         self.post_warmup_learning_rate = post_warmup_learning_rate
         self.warmup_steps = warmup_steps
+        self.decay_steps = decay_steps
+        self.scheduled_steps = warmup_steps + decay_steps
         self.optimizer_steps = 0
         self.plateau = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
@@ -89,32 +92,39 @@ class WarmupPlateauScheduler:
             threshold_mode="rel",
             min_lr=minimum_learning_rate,
         )
-        self._set_learning_rate(maximum_learning_rate / warmup_steps)
+        self._set_learning_rate(self._learning_rate_for_step(1))
 
     def _set_learning_rate(self, value: float) -> None:
         for group in self.optimizer.param_groups:
             group["lr"] = value
 
+    def _learning_rate_for_step(self, step: int) -> float:
+        if step <= self.warmup_steps:
+            return self.maximum_learning_rate * step / self.warmup_steps
+        if self.decay_steps and step <= self.scheduled_steps:
+            progress = (step - self.warmup_steps) / self.decay_steps
+            return self.post_warmup_learning_rate + 0.5 * (
+                self.maximum_learning_rate - self.post_warmup_learning_rate
+            ) * (1.0 + math.cos(math.pi * progress))
+        return self.post_warmup_learning_rate
+
     def step(self) -> None:
         self.optimizer_steps += 1
-        if self.optimizer_steps < self.warmup_steps:
-            self._set_learning_rate(
-                self.maximum_learning_rate
-                * (self.optimizer_steps + 1)
-                / self.warmup_steps
-            )
-        elif self.optimizer_steps == self.warmup_steps:
+        next_step = self.optimizer_steps + 1
+        if next_step <= self.scheduled_steps:
+            self._set_learning_rate(self._learning_rate_for_step(next_step))
+        elif self.optimizer_steps == self.scheduled_steps:
             self._set_learning_rate(self.post_warmup_learning_rate)
 
     def step_validation(self, score: float) -> dict[str, Any]:
         before = float(self.optimizer.param_groups[0]["lr"])
-        eligible = self.optimizer_steps >= self.warmup_steps
+        eligible = self.optimizer_steps >= self.scheduled_steps
         if eligible:
             self.plateau.step(score)
         after = float(self.optimizer.param_groups[0]["lr"])
         return {
             "score": score,
-            "eligible_after_warmup": eligible,
+            "eligible_after_scheduled_decay": eligible,
             "learning_rate_before": before,
             "learning_rate_after": after,
             "reduced": after < before,
@@ -125,6 +135,7 @@ class WarmupPlateauScheduler:
             "maximum_learning_rate": self.maximum_learning_rate,
             "post_warmup_learning_rate": self.post_warmup_learning_rate,
             "warmup_steps": self.warmup_steps,
+            "decay_steps": self.decay_steps,
             "optimizer_steps": self.optimizer_steps,
             "plateau": self.plateau.state_dict(),
         }
@@ -134,11 +145,13 @@ class WarmupPlateauScheduler:
             self.maximum_learning_rate,
             self.post_warmup_learning_rate,
             self.warmup_steps,
+            self.decay_steps,
         )
         observed = (
             float(state["maximum_learning_rate"]),
             float(state["post_warmup_learning_rate"]),
             int(state["warmup_steps"]),
+            int(state["decay_steps"]),
         )
         if observed != expected:
             raise ValueError("Learning-rate scheduler configuration changed")
@@ -530,11 +543,19 @@ def main() -> None:
     warmup_steps = max(
         1, round(epochs * batches_per_epoch * float(training["warmup_fraction"]))
     )
+    decay_steps = max(
+        0,
+        round(
+            batches_per_epoch
+            * float(training.get("post_warmup_decay_epochs", 0.0))
+        ),
+    )
     scheduler = WarmupPlateauScheduler(
         optimizer,
         maximum_learning_rate=float(training["max_learning_rate"]),
         post_warmup_learning_rate=float(training["post_warmup_learning_rate"]),
         warmup_steps=warmup_steps,
+        decay_steps=decay_steps,
         plateau_factor=float(training["plateau_factor"]),
         plateau_patience=int(training["plateau_patience"]),
         plateau_threshold=float(training["plateau_threshold"]),
@@ -593,6 +614,7 @@ def main() -> None:
                 "split_counts": counts,
                 "batches_per_epoch": batches_per_epoch,
                 "warmup_steps": warmup_steps,
+                "decay_steps": decay_steps,
                 "target_shapes": {
                     "atac": [int(atac_metadata["bins_per_target"]), len(contexts)],
                     "h3k27ac": [int(h3_metadata["bins_per_target"]) // h3_pool_size, len(contexts)],
