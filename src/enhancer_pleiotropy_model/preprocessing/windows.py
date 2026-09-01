@@ -68,6 +68,14 @@ def parse_args() -> argparse.Namespace:
         default=("atac",),
         help="BigWig assays to emit; the default preserves ATAC-only behavior.",
     )
+    parser.add_argument(
+        "--omit-signal-summaries",
+        action="store_true",
+        help=(
+            "Do not redundantly store per-window BigWig means. Dense profile "
+            "targets should be generated separately with the profiles command."
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--metadata", required=True, type=Path)
     parser.add_argument("--window-size", type=int, default=512)
@@ -341,14 +349,19 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
             "Building signal windows requires pyBigWig; training an existing dataset does not"
         ) from error
 
-    signal_assays = tuple(getattr(args, "signal_assays", ("atac",)))
+    requested_signal_assays = tuple(getattr(args, "signal_assays", ("atac",)))
     context_flank_size = getattr(args, "context_flank_size", 0)
     validation_stride = getattr(args, "validation_stride", None) or args.stride
     split_strategy = getattr(args, "split_strategy", "blocked")
     h3k27ac_peaks_bed = getattr(args, "h3k27ac_peaks_bed", None)
     master_dhs_summits_bed = getattr(args, "master_dhs_summits_bed", None)
-    if not signal_assays or len(set(signal_assays)) != len(signal_assays):
+    if not requested_signal_assays or len(set(requested_signal_assays)) != len(
+        requested_signal_assays
+    ):
         raise ValueError("signal-assays must be a non-empty list without duplicates")
+    signal_assays = (
+        () if getattr(args, "omit_signal_summaries", False) else requested_signal_assays
+    )
     positive_integers = {
         "window-size": args.window_size,
         "stride": args.stride,
@@ -756,6 +769,7 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
             else "blocked_sliding_window_multimodal_epigenomic_signal_v1"
         ),
         "signal_assays": list(signal_assays),
+        "window_signal_summaries_omitted": not bool(signal_assays),
         "window_size_bp": args.window_size,
         "target_window_size_bp": args.window_size,
         "context_flank_size_bp": context_flank_size,
@@ -785,7 +799,10 @@ def build_windows(args: argparse.Namespace) -> dict[str, object]:
         },
         "signal_summary": signal_summary,
         "target_definition": (
-            "mean basewise background-TMM-normalized context-average coverage for each "
+            "Dense assay labels are stored separately in profile arrays; the window table "
+            "contains sequence and sampling metadata only"
+            if not signal_assays
+            else "mean basewise background-TMM-normalized context-average coverage for each "
             "requested assay over the central target window only; bases absent from a sparse BigWig "
             "contribute zero"
         ),

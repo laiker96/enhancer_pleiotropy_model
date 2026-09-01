@@ -15,6 +15,10 @@ The default input filename contracts are:
 <context>_h3k27ac_rep<number>_peaks.broadPeak
 ```
 
+The production window table does not repeat per-window BigWig means. The ATAC
+and H3K27ac profile rules extract dense labels directly into hashed NumPy
+arrays, avoiding a redundant 16-track integration pass.
+
 For contexts with multiple H3K27ac peak replicates, an interval is retained
 only when it overlaps a peak in every other replicate. Single-replicate
 contexts retain that replicate. Supported intervals are merged into one union

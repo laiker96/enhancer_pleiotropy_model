@@ -74,8 +74,6 @@ rule windows:
         dhs=config["inputs"]["master_dhs_bed"],
         summits=config["inputs"]["master_dhs_summits_bed"],
         h3=f"{OUTPUT}/data/h3k27ac_consensus_union.bed",
-        atac_bigwigs=bigwigs("atac"),
-        h3_bigwigs=bigwigs("h3k27ac"),
     output:
         table=f"{OUTPUT}/data/windows.tsv.gz",
         metadata=f"{OUTPUT}/data/windows.metadata.json",
@@ -108,6 +106,7 @@ rule windows:
           --h3k27ac-peaks-bed {input.h3:q} \
           --bigwig-directory {params.bigwig_directory:q} \
           --signal-assays atac h3k27ac \
+          --omit-signal-summaries \
           --window-size {params.target} \
           --context-flank-size {params.flank} \
           --stride {params.train_stride} \
