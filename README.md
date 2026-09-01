@@ -100,11 +100,20 @@ environment_job=$(sbatch --parsable cluster/setup_environment.sbatch)
 sbatch --dependency="afterok:${environment_job}" cluster/train_final_4x.sbatch
 ```
 
-The final launcher first trains the broad base model for up to 40 epochs, then
-loads its best checkpoint and fine-tunes the full network for up to 10 epochs
-on context-specific peak windows at an initial learning rate of `1e-5`. Both
-stages are restartable, and raw BigWigs are not needed on the GPU node once
-prepared arrays have been copied.
+The final launcher defaults to the broad base stage, which trains for up to 40
+epochs. After inspecting that checkpoint, submit the independently restartable
+specificity stage with a dependency on the completed base job:
+
+```bash
+base_job=$(sbatch --parsable cluster/train_final_4x.sbatch)
+sbatch --dependency="afterok:${base_job}" \
+  --export=ALL,TRAINING_STAGE=specificity \
+  cluster/train_final_4x.sbatch
+```
+
+The specificity stage loads the best base checkpoint and fine-tunes the full
+network for up to 10 epochs at an initial learning rate of `1e-5`. Raw BigWigs
+are not needed on the GPU node once prepared arrays have been copied.
 
 ## Load a checkpoint
 

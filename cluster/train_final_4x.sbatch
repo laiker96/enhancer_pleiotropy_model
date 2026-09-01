@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=enh_crestcurr
+#SBATCH --job-name=enh_crest4x
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -19,6 +19,11 @@ fi
 
 repository=${SLURM_SUBMIT_DIR:?Submit this job from the repository root}
 config_path=results/final_4x_chr2l_halfval_chr3r_test/run_config.yaml
+training_stage=${TRAINING_STAGE:-base}
+if [[ $training_stage != base && $training_stage != specificity ]]; then
+  echo "TRAINING_STAGE must be base or specificity" >&2
+  exit 1
+fi
 
 required=(
   "$repository/.venv/bin/python"
@@ -41,9 +46,5 @@ mkdir -p logs
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 srun --ntasks=1 .venv/bin/python -m enhancer_pleiotropy_model.training \
   --config "$config_path" \
-  --stage base \
-  --resume
-srun --ntasks=1 .venv/bin/python -m enhancer_pleiotropy_model.training \
-  --config "$config_path" \
-  --stage specificity \
+  --stage "$training_stage" \
   --resume
