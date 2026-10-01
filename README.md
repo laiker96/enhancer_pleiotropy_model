@@ -1,237 +1,184 @@
 # Enhancer pleiotropy model
 
-This repository contains the minimal reproducible pipeline used to train and
-load the Drosophila eight-context joint ATAC/H3K27ac sequence model. It is
-deliberately narrower than the experimental workspace from which it was
-extracted.
+Reproduce the v4 Drosophila sequence-model comparison: process inputs, train
+ATAC/H3K27ac regressors, train eight-context classifiers from scratch or by
+fine-tuning, then generate nucleotide attributions and native-enhancer motifs.
+An archived Figure 3 also has a standalone, source-data replay command.
 
-The default model is the best-performing **4x Enformer-like joint profile
-regressor**. It accepts a 2,048-bp one-hot DNA sequence and predicts:
+Start with **[reproduce/config.yaml](reproduce/config.yaml)** and
+**[the reproduction guide](docs/reproduction.md)**. This workflow reuses the
+existing scientific implementations; it does not depend on a CECAR hostname,
+another repository checkout, a RunPod backup, or an absolute researcher path.
+For the measured outcomes, see the **[paper benchmark tables](docs/paper_benchmarks.md)**:
+94 completed models, three-seed comparisons, per-context metrics and checkpoint provenance.
+The portable workflow trains the primary three architectures below; the tables
+also retain the historical EnhancerNet and shorter-input studies separately.
 
-- ATAC over the central 512 bp as 32 x 16-bp bins;
-- H3K27ac over the central 1,536 bp as 24 x 64-bp bins;
-- both assays in `ab`, `e13`, `e5`, `ead`, `hid`, `lb`, `o`, and `wid`.
+## Models
 
-`e11` is intentionally excluded.
+All models in this workflow take 2,048 bp and predict eight contexts:
+`ab, e13, e5, ead, hid, lb, o, wid`. `e11` is excluded.
 
-## Repository layout
+| Architecture | Regressor | Classifier scratch / fine-tuning |
+|---|---|---|
+| Dilated CNN | Shared 4x stem + six dilated convolution blocks | Legacy replacement readout, or retained assay hidden heads |
+| CNN + attention | Same stem + attention blocks | Legacy replacement readout, or retained assay hidden heads |
+| Flatten/dense CNN | Same stem + flatten + two shared dense blocks | Keep shared dense blocks; replace final signal projections |
+
+The recommended historical classifier is the **background-trained, regressor-
+pretrained dilated CNN with retained assay hidden heads**, seed 20260914,
+selected epoch 38. Its validation macro AP was 0.648744 among enhancers and
+0.586317 among enhancers plus background. These are reference results, not
+results of a new run. The enhancer-only legacy CNN scored better on enhancer-only
+discrimination (validation AP 0.666546) but worse with background (test combined
+AP 0.514694 versus 0.582833). There is no population-independent winner.
+See [all benchmark tables](docs/paper_benchmarks.md) and
+[scientific contracts](docs/reproduction_science.md).
+
+[![Best background-trained dilated CNN: 2,048-bp DNA input, residual and dilated convolutional blocks, retained assay hidden heads, and eight context outputs.](docs/figures/best_model_architecture.png)](docs/figures/best_model_architecture.svg)
+
+The best background-trained classifier has **1,244,168 parameters**. Dashed
+signal branches show regressor pretraining only; the classifier retains their
+hidden layers, not their signal outputs.
+[Vector figure](docs/figures/best_model_architecture.svg) ·
+[PDF](docs/figures/best_model_architecture.pdf).
+
+For CNN/attention, `legacy` discards the two assay hidden heads; the corrected
+`retained_assay_hidden_v1` transfers and fine-tunes them. Both also transfer
+the encoder. These readouts differ architecturally, so this is **not a
+weight-initialization-only ablation**. Dense's historical `legacy` identifier
+already retains its shared dense representation.
+
+Choose a named recipe with `--recipe` in both the stage CLI and Slurm submitter:
+
+| Recipe | Regressors | Classifier fits | Comparison |
+|---|---:|---:|---|
+| `best` | 1 | 6 | Dilated CNN, retained hidden heads, background, scratch vs fine-tuning |
+| `architectures` | 3 | 18 | CNN, attention, flatten/dense; background; scratch vs fine-tuning |
+| `readouts` | 2 | 24 | CNN/attention; replace vs retain hidden heads; enhancer-only; scratch vs fine-tuning |
+| `full` | 3 | 60 | All supported architectures, readouts and training populations |
+
+All use three classifier seeds and one parent regressor per architecture, 40
+epochs and the original LR schedules. Recipes only select the matrix; they do
+not alter losses, scaling, splits or attribution settings. Outputs are isolated
+under `paths.work/RECIPE`. Omitting `--recipe` preserves the original full matrix
+and work directory. The full matrix includes 12 legacy-readout/background fits
+that have **no historical result yet**; planned fits are never labeled measured.
+
+## Layout
 
 ```text
-config/default.yaml                 Default data/model/training configuration
-src/enhancer_pleiotropy_model/      Importable model and pipeline code
-src/.../preprocessing/              Window, peak, and BigWig processing
-scripts/create_environment.sh       Project-local mamba environment
-Snakefile                           Reproducible preprocessing and training DAG
-cluster/                            Slurm launcher; never computes on login node
-tests/                              Focused unit and checkpoint-compatibility tests
-docs/                               Data and model contracts
+reproduce/config.yaml             Experiment matrix, inputs, analysis choices
+reproduce/regression.yaml         Frozen scientific regressor configuration
+reproduce/requirements-*.txt       Training and TF-MoDISco environment pins
+reproduce/slurm/                  Generic Slurm entry point + dry-run submitter
+reproduce/figure3/                Checksummed plotted values for the archived figure
+reproduce/benchmarks/models.json  Public-path-safe historical metrics and checkpoints
+experiments/reproduction/         Thin, portable orchestration
+experiments/classifier_transfer/  Regressors, classifiers, data, metrics
+experiments/classifier_motifs/    Attribution kernels
+experiments/classifier_modisco/   Native-length discovery, filtering, figure code
+src/enhancer_pleiotropy_model/    Preprocessing, profile models and training
+scripts/reproduce.py              Single stage-based command
+scripts/summarize_paper_benchmarks.py  Rebuild/check the GitHub benchmark tables
 ```
 
-Raw data, prepared arrays, checkpoints, logs, and reports are ignored by Git.
+Historical experiments and site launchers are preserved, not silently rewritten.
+The old README is [archived](docs/legacy_regressor_readme.md).
+`config/default.yaml`, `Snakefile`, and `cluster/` are **not** the new workflow's defaults.
 
-## Required inputs
+## Quick start
 
-The default workflow expects:
-
-1. dm6 FASTA;
-2. dm6 blacklist BED;
-3. master DHS BED and summit BED;
-4. H3K27ac replicate broadPeak files, named
-   `<context>_h3k27ac_rep<number>_peaks.broadPeak`;
-5. normalized mean BigWigs named
-   `<context>.<assay>.mean.background_tmm.bw`.
-
-Peak files determine sampling strata. Regression labels are always extracted
-from the BigWigs. BAM files are not required when normalized BigWigs already
-exist.
-
-Edit paths in `config/default.yaml`; do not commit raw data.
-
-## Environment
-
-Install all packages with mamba into the repository-local `.venv` prefix:
+Use Python 3.11. Create environments **on the destination machine**; do not copy
+a local environment. Install on a permitted setup/compute node, following
+your cluster's policy. Do not modify an existing environment used by running jobs.
 
 ```bash
-bash scripts/create_environment.sh
-mamba activate "$PWD/.venv"
+python3.11 -m venv .venv-reproduce
+.venv-reproduce/bin/python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu118
+.venv-reproduce/bin/python -m pip install -r reproduce/requirements-train.txt
+.venv-reproduce/bin/python -m pip check
+
+python3.11 -m venv .venv-modisco
+.venv-modisco/bin/python -m pip install -r reproduce/requirements-modisco.txt
+.venv-modisco/bin/python -m pip check
 ```
 
-The setup writes exact installed versions to `environment.lock.txt`.
+Install MEME Suite **5.5.9** separately (e.g. a cluster module or a dedicated
+Bioconda environment) and make `tomtom` available to MoDISco jobs. Record
+`pip freeze` for both environments and `tomtom -version`. No dependencies or
+motif databases are downloaded implicitly by the analysis commands.
 
-## Prepare data and train
-
-Inspect the workflow first:
+Place the checksummed **v4 input export** at the configured archive path.
+It contains the dm6 reference/blacklist, master DHS, H3K27ac peaks, normalized
+BigWigs and enhancer catalog. This pipeline starts from that processed-data
+boundary, **not FASTQ files**. The export and checkpoints are not bundled in
+Git and currently have no configured public download URL. See the
+[input contract](docs/reproduction.md#input-data).
 
 ```bash
-.venv/bin/snakemake --configfile config/default.yaml --dry-run
+.venv-reproduce/bin/python scripts/reproduce.py plan --recipe best
+cp reproduce/slurm/site.example.yaml reproduce/slurm/site.yaml
+# Edit site.yaml: interpreter paths, account, partitions, GPU type and limits.
+.venv-reproduce/bin/python reproduce/slurm/submit.py preprocessing --recipe best --site reproduce/slurm/site.yaml
 ```
 
-Run preprocessing on CPU:
+That last command only prints the plan. Add `--execute` after checking it.
+Then submit `training --recipe best` after preprocessing finishes, and `analysis --recipe best` after
+training/calibration. Each pipeline uses `afterok` dependencies internally.
+See the guide for task indices, checkpointed resumption and monitoring.
+
+GPU stages refuse to run outside a Slurm compute allocation. CPU stages can
+run locally only with `--local-cpu`. **Nothing is submitted just by installing,
+planning, importing modules, or running the CPU tests.**
+
+## Attributions, motifs and the paper figure
+
+New analysis retains full 2,048-bp actual and hypothetical IG for eight
+calibrated probabilities plus mean observed-active-context logit. Production
+uses 100 shuffled references and IG64, gated by a numerical pilot on each GPU
+type. Summing the eight probability maps yields calibrated-breadth attribution.
+TF-MoDISco uses **native enhancer intervals**, training enhancers only, positive
+and negative motifs, information-filtered cores, and no extra reclustering.
+Tomtom and a self-contained HTML motif report use locally supplied databases.
+
+The archived September 20 paper figure used a **different, enhancer-only legacy
+checkpoint and 50-reference attribution**. Replay it without inference:
 
 ```bash
-.venv/bin/snakemake --configfile config/default.yaml --cores 4 prepared_data
+CUDA_VISIBLE_DEVICES='' .venv-reproduce/bin/python scripts/reproduce.py figure \
+  --local-cpu --output output/pdf/figure3_replay.pdf
 ```
 
-The final 40-epoch run uses `config/final_4x.yaml`. It trains on chrX, chr2R,
-chr3L, chr4, chrY, the two configured unplaced scaffolds, and the right half of
-chr2L. The left half of chr2L is validation and chr3R is test. A 10-kb gap is
-excluded around the chr2L midpoint, and every complete 2,048-bp input must fit
-inside one split.
+This re-renders the saved plotted values; it does not claim to recalculate
+the old attribution/discovery. Panel A is omitted. The added enhancer examples
+make the final layout B–E. [Figure provenance and raw-analysis code](reproduce/figure3/README.md).
+This fixture is **not the newer September 29–30 masked-context/family Figure 3**.
+That later analysis is not yet connected to this portable figure command.
+
+## Verification and portable export
 
 ```bash
-.venv/bin/snakemake --configfile config/final_4x.yaml --cores 4 prepared_data
+CUDA_VISIBLE_DEVICES='' PYTHONPATH=src:experiments:scripts \
+  .venv-reproduce/bin/python -m pytest tests/test_reproduction.py tests/test_calibrated_attribution.py tests/test_paper_benchmarks.py
+
+.venv-reproduce/bin/python scripts/reproduce.py inventory --recipe best --local-cpu
+.venv-reproduce/bin/python scripts/summarize_paper_benchmarks.py --check
+.venv-reproduce/bin/python scripts/export_reproduction_release.py --output results/reproduction_source.tar.gz
 ```
 
-Run the complete workflow on a CUDA host:
+The export command is also dry-run by default; add `--write` to create an
+allowlisted source archive. It excludes data, checkpoints, run logs, site
+credentials and dated submission scripts. No upload, Git commit or push is
+performed. Undefined metrics remain null/blank, never invented zeros.
 
-```bash
-mkdir -p logs
-tmux new -d -s enhancer_pleiotropy_train \
-  '.venv/bin/snakemake --configfile config/final_4x.yaml --cores 4 --resources gpu=1 --rerun-incomplete 2>&1 | tee logs/train.log'
-tail -f logs/train.log
-```
+[Verification results and remaining limits](docs/reproduction_verification.md):
+76 passed in the current publication CPU suite and in a clean source export.
+The earlier cleanup also passed 95 tests/7 skipped and verified exact archived
+PDF replay with the original reporting version. Full training
+and native TF-MoDISco execution were not rerun during the cleanup.
 
-The Slurm launchers in `cluster/` reject the login node. For the final run,
-first create the repository-local environment on a CPU compute node, then
-submit training with an `afterok` dependency:
-
-```bash
-environment_job=$(sbatch --parsable cluster/setup_environment.sbatch)
-sbatch --dependency="afterok:${environment_job}" cluster/train_final_4x.sbatch
-```
-
-The final launcher defaults to the broad base stage, which trains for up to 40
-epochs. After inspecting that checkpoint, submit the independently restartable
-specificity stage with a dependency on the completed base job:
-
-```bash
-base_job=$(sbatch --parsable cluster/train_final_4x.sbatch)
-sbatch --dependency="afterok:${base_job}" \
-  --export=ALL,TRAINING_STAGE=specificity \
-  cluster/train_final_4x.sbatch
-```
-
-The specificity stage loads the best base checkpoint and fine-tunes the full
-network for up to 10 epochs at an initial learning rate of `1e-5`. Raw BigWigs
-are not needed on the GPU node once prepared arrays have been copied.
-
-## Load a checkpoint
-
-```python
-from enhancer_pleiotropy_model import load_model
-
-model, metadata = load_model("results/default_4x/model/best_model.pt")
-model.eval()
-print(metadata.contexts)
-```
-
-For tabular sequence inference:
-
-```bash
-.venv/bin/enhancer-predict \
-  --checkpoint results/default_4x/model/best_model.pt \
-  --sequences sequences.tsv \
-  --output predictions.npz \
-  --reverse-complement-ensemble
-```
-
-`sequences.tsv` must contain `id` and `sequence`; production checkpoints
-expect 2,048 unambiguous A/C/G/T bases.
-
-## Observed/predicted browser tracks
-
-Generate paired observed and predicted BigWigs across the final chr2L
-validation interval, followed by a portable IGV session:
-
-```bash
-.venv/bin/enhancer-browser-tracks \
-  --checkpoint results/default_4x/model/best_model.pt \
-  --reference-fasta data/raw/reference/dm6.fa \
-  --blacklist-bed data/raw/reference/dm6.blacklist.bed \
-  --observed-bigwig-directory data/raw/bigwig \
-  --output-directory results/default_4x/browser/chr2L_validation \
-  --chromosome chr2L \
-  --region-start 0 \
-  --region-end 11751856 \
-  --stride 256 \
-  --batch-size 64 \
-  --device cuda \
-  --mixed-precision fp16
-```
-
-The command creates observed/predicted pairs for both assays and all eight
-contexts plus `igv_session.xml`. It uses a complete genome-anchored sliding
-grid, not the balanced training-table subset. Every overlapping prediction is
-averaged at each native model bin (16 bp for ATAC and 64 bp for H3K27ac), and
-the observed tracks use the identical bins and support mask. Expensive
-inference is checkpointed in `.partial_predictions.npz`.
-
-The current local checkpoint was selected on chr2L validation. These browser
-tracks are therefore appropriate for qualitative model QC, not as an
-untouched test-set performance estimate.
-
-Generate the complete quantitative validation report reproducibly with:
-
-```bash
-XDG_CACHE_HOME="$PWD/.cache" .venv/bin/snakemake \
-  --configfile config/default.yaml \
-  --cores 4 \
-  --rerun-incomplete \
-  browser_validation_report \
-  --resources gpu=1
-```
-
-This target creates per-context accuracy metrics, tissue-pattern metrics,
-observed/predicted context-correlation matrices, target-PCA diagnostics,
-DHS/H3K27ac/background stratification, deterministic success/failure
-bookmarks, 16 signed residual BigWigs, a combined IGV session, and a
-self-contained `index.html`. Every quantitative input is SHA-256 hashed in
-`analysis_config.json`. Definitions and standalone commands are documented in
-[`docs/browser_validation.md`](docs/browser_validation.md).
-
-## Training defaults
-
-- stochastic reverse complement with probability 0.5;
-- forward/RC ensemble for validation;
-- the reusable default configuration keeps ATAC raw Poisson NLL and H3K27ac
-  train-standardized log1p SmoothL1;
-- the final 40-epoch experiment in `config/final_4x.yaml` instead applies
-  CREsted `CosineMSELogLoss` independently to both assays, with cosine
-  similarity calculated across the eight contexts at each output bin;
-- AdamW with weight decay 0.01;
-- linear warmup to `1e-4`; the final configuration uses a four-epoch cosine
-  transition to `5e-5` before plateau scheduling;
-- validation-plateau reduction by 0.5 after three epochs;
-- scientific checkpoint score combining window and tissue-pattern Pearson;
-- restartable batch and epoch checkpoints.
-
-For CREsted runs, training and validation logs separately report each assay's
-log-MSE, mean context-vector cosine similarity, dynamic cosine weight, and
-combined loss. The checkpoint records the exact loss configuration and
-multipliers. The loss change does not alter the prepared data or chromosome
-splits.
-
-The CREsted-style specificity stage fits assay-specific Gini thresholds on
-training peaks only. Window activity is the mean target signal in each of the
-eight contexts. A peak is retained when its ATAC Gini exceeds the ATAC
-training-peak mean plus one standard deviation, or its H3K27ac Gini exceeds
-the corresponding H3K27ac threshold. Background windows are excluded from
-this stage. The fine-tuned checkpoint is selected on the matching
-specificity-only validation subset, while full-validation metrics are also
-logged every epoch. Outputs are written to `model_specific_finetune/`; the
-broad base outputs remain in `model/`.
-
-The test chromosome is excluded from training and validation and is evaluated
-only after model and analysis choices are frozen.
-
-## Tests
-
-```bash
-.venv/bin/pytest
-```
-
-The repository does not yet include the enhancer classifier. Because the
-catalog labels are derived from ATAC and H3K27ac, the first enhancer caller
-should calibrate a score from the regressor outputs. A classifier can be added
-later if it uses independent functional labels or demonstrably improves
-held-out performance.
+The source workflow and historical benchmark are separate from a public data/model
+release: the checksummed v4 export still needs a stable download/deposit, and a
+fresh end-to-end cluster run remains to be validated. Installing the source alone
+does not supply training data or pretrained checkpoints.

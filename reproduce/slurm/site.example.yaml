@@ -1,0 +1,26 @@
+# Copy to site.yaml. Paths are resolved relative to the repository root.
+# The environment must already exist on the shared filesystem.
+python: .venv-reproduce/bin/python
+modisco_python: .venv-modisco/bin/python
+# Source optional site module commands BEFORE invoking either Python.
+environment_script: reproduce/slurm/environment.example.sh
+account: ""                 # e.g. your allocation; omitted when empty
+cpu_partition: CHANGE_ME
+gpu_partition: CHANGE_ME
+gpu_request: gpu:1           # e.g. gpu:a100:1, gpu:rtx2080:1, or gpu:1
+max_parallel: 4             # maximum GPUs in EACH array
+# Optionally pass a site constraint, reservation, qos, etc. Never shell text.
+extra_sbatch_args: []        # e.g. [--constraint=a100]
+resources:
+  stage-inputs: {cpus: 2, mem: 12G, time: '02:00:00'}
+  prepare-regression: {cpus: 8, mem: 64G, time: '12:00:00'}
+  prepare-classifiers: {cpus: 4, mem: 32G, time: '04:00:00'}
+  train-regressor: {cpus: 4, mem: 48G, time: '24:00:00'}
+  train-classifier: {cpus: 4, mem: 32G, time: '24:00:00'}
+  evaluate: {cpus: 4, mem: 24G, time: '04:00:00'}
+  calibrate: {cpus: 2, mem: 12G, time: '00:30:00'}
+  attribute-pilot: {cpus: 4, mem: 24G, time: '00:30:00'}
+  attribute: {cpus: 4, mem: 32G, time: '24:00:00'}
+  modisco: {cpus: 8, mem: 64G, time: '24:00:00'}
+  figure: {cpus: 1, mem: 4G, time: '00:15:00'}
+  inventory: {cpus: 1, mem: 4G, time: '00:15:00'}

@@ -1,0 +1,10 @@
+# Python 3.11, separate CPU environment. MEME 5.5.9 is installed separately.
+modisco==2.5.2
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.2.3
+numba==0.61.2
+h5py==3.13.0
+scikit-learn==1.6.1
+PyYAML==6.0.2
+reportlab==4.4.9

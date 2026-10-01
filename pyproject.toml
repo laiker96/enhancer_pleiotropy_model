@@ -25,6 +25,17 @@ enhancer-train = "enhancer_pleiotropy_model.training:main"
 enhancer-predict = "enhancer_pleiotropy_model.inference:main"
 enhancer-browser-tracks = "enhancer_pleiotropy_model.browser_tracks:main"
 enhancer-browser-report = "enhancer_pleiotropy_model.browser_report:main"
+enhancer-browser-comparison = "enhancer_pleiotropy_model.browser_comparison:main"
+enhancer-browser-comparison-report = "enhancer_pleiotropy_model.browser_comparison_report:main"
+enhancer-compare-models-on-enhancers = "enhancer_pleiotropy_model.enhancer_model_comparison_inference:main"
+enhancer-report-models-on-enhancers = "enhancer_pleiotropy_model.enhancer_model_comparison_report:main"
+enhancer-evaluate-catalog = "enhancer_pleiotropy_model.enhancer_catalog_evaluation:main"
+enhancer-calibrate = "enhancer_pleiotropy_model.enhancer_calibration:main"
+enhancer-audit-calibrator = "enhancer_pleiotropy_model.enhancer_calibration_audit:main"
+enhancer-evaluate-continuous-activity = "enhancer_pleiotropy_model.continuous_activity:main"
+enhancer-build-master-states = "enhancer_pleiotropy_model.master_element_states:main"
+enhancer-calibrate-master-states = "enhancer_pleiotropy_model.master_element_calibration:main"
+enhancer-evaluate-residual-ensemble = "enhancer_pleiotropy_model.residual_ensemble:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

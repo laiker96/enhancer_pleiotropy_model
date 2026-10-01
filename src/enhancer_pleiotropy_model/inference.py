@@ -43,7 +43,8 @@ def load_model(
     """Load a released or historical production joint-profile checkpoint."""
     path = Path(checkpoint_path)
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    if checkpoint.get("kind") != "enformer_like_dense_atac_h3k27ac_profile_regressor":
+    if checkpoint.get("kind") not in {"enformer_like_dense_atac_h3k27ac_profile_regressor",
+                                      "alphagenome_small_joint_profile_regressor"}:
         raise ValueError(f"{path}: unsupported checkpoint kind")
     contexts = tuple(str(value) for value in checkpoint.get("contexts", ()))
     architecture = dict(checkpoint.get("architecture", {}))
@@ -57,13 +58,24 @@ def load_model(
     cross_attention = dict(architecture.get("h3k27ac_atac_cross_attention", {}))
     if bool(cross_attention.get("enabled", False)):
         raise ValueError("Cross-attention checkpoints are not supported in v0.1")
-    model = EnformerLikeJointProfileRegressor(
-        context_count=len(contexts),
-        model_size=infer_model_preset(architecture),
-        h3k27ac_output_pool_size=int(
-            architecture.get("h3k27ac_output_pool_size", 4)
-        ),
-    )
+    if checkpoint["kind"] == "alphagenome_small_joint_profile_regressor":
+        from .alphagenome_model import AlphaGenomeSmall, ARCHITECTURE_NAME, ARCHITECTURE_16BP_NAME
+        if architecture.get("name") not in (ARCHITECTURE_NAME, ARCHITECTURE_16BP_NAME):
+            raise ValueError("AlphaGenome-small checkpoint architecture differs")
+        spacing = 16 if architecture["name"] == ARCHITECTURE_16BP_NAME else 128
+        model = AlphaGenomeSmall(context_count=len(contexts), output_scaling=architecture.get("output_scaling"),
+                                 transformer_bin_bp=spacing)
+        if model.architecture_metadata() != architecture:
+            raise ValueError("AlphaGenome-small checkpoint geometry or metadata differs")
+    else:
+        model = EnformerLikeJointProfileRegressor(
+            context_count=len(contexts),
+            model_size=infer_model_preset(architecture),
+            h3k27ac_output_pool_size=int(
+                architecture.get("h3k27ac_output_pool_size", 4)
+            ),
+            output_scaling=architecture.get("output_scaling"),
+        )
     model.load_state_dict(checkpoint["state_dict"], strict=True)
     resolved = resolve_device(device) if isinstance(device, str) else device
     model.to(resolved)

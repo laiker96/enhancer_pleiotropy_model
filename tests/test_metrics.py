@@ -2,6 +2,7 @@ import numpy as np
 
 from enhancer_pleiotropy_model.metrics import (
     correlation_structure,
+    regulatory_overcorrelation_summary,
     scientific_composite,
     tissue_pattern_metrics,
 )
@@ -36,3 +37,37 @@ def test_scientific_composite_uses_both_assays_and_metric_families():
         },
     }
     assert np.isclose(scientific_composite(metrics), 0.5)
+
+
+def test_regulatory_overcorrelation_uses_positive_pairwise_excess():
+    truth = np.asarray(
+        [
+            [1.0, 0.2, 0.2],
+            [0.2, 1.0, 0.2],
+            [0.2, 0.2, 1.0],
+        ]
+    )
+    predicted = np.asarray(
+        [
+            [1.0, 0.4, 0.1],
+            [0.4, 1.0, 0.2],
+            [0.1, 0.2, 1.0],
+        ]
+    )
+    structure = {
+        "true_matrix": truth.tolist(),
+        "predicted_matrix": predicted.tolist(),
+    }
+    metrics = {
+        assay: {
+            "regulatory_windows": {"correlation_structure": structure}
+        }
+        for assay in ("atac", "h3k27ac")
+    }
+
+    result = regulatory_overcorrelation_summary(metrics)
+
+    assert result["pairs"] == 6
+    assert np.isclose(result["mean_positive_excess"], 0.2 / 3)
+    assert np.isclose(result["mean_absolute_error"], 0.1)
+    assert np.isclose(result["mean_signed_difference"], 0.1 / 3)

@@ -289,6 +289,7 @@ class EnformerLikeJointProfileRegressor(nn.Module):
         head_dropout: float = 0.1,
         model_size: str = "4x",
         h3k27ac_output_pool_size: int = H3K27AC_OUTPUT_POOL_SIZE,
+        output_scaling: dict[str, list[float]] | None = None,
     ) -> None:
         super().__init__()
         if model_size not in MODEL_PRESETS:
@@ -306,6 +307,18 @@ class EnformerLikeJointProfileRegressor(nn.Module):
         dimension = self.convolution_filters[-1]
         self.context_count = context_count
         self.h3k27ac_output_pool_size = h3k27ac_output_pool_size
+        self.output_scaling = None
+        if output_scaling is not None:
+            if set(output_scaling) != {"atac", "h3k27ac"}:
+                raise ValueError("Output scaling requires both assay track means")
+            self.output_scaling = {}
+            for assay, values in output_scaling.items():
+                means = torch.as_tensor(values, dtype=torch.float32)
+                if (means.shape != (context_count,) or not torch.isfinite(means).all()
+                        or torch.any(means <= 0)):
+                    raise ValueError("Output scaling means must be finite and positive")
+                self.register_buffer(f"{assay}_output_means", means)
+                self.output_scaling[assay] = means.tolist()
         self.convolutional_body = EnformerLikeConvolutionalBody(
             dropout,
             convolution_filters=self.convolution_filters,
@@ -343,6 +356,13 @@ class EnformerLikeJointProfileRegressor(nn.Module):
         expected = (self.context_count,)
         if atac_means.shape != expected or h3k27ac_means.shape != expected:
             raise ValueError("Output means do not match contexts")
+        if self.output_scaling is not None:
+            from .alphagenome_loss import soft_clip
+
+            atac_means, h3k27ac_means = (
+                soft_clip(torch.as_tensor(values) / torch.tensor(self.output_scaling[assay])).numpy()
+                for assay, values in (("atac", atac_means), ("h3k27ac", h3k27ac_means))
+            )
         self._initialize_head_means(self.atac_head, atac_means)
         self._initialize_head_means(self.h3k27ac_head, h3k27ac_means)
 
@@ -383,10 +403,18 @@ class EnformerLikeJointProfileRegressor(nn.Module):
                 self.h3k27ac_output_pool_size,
                 h3k27ac_hidden.shape[2],
             ).mean(dim=2)
-        return (
+        outputs = (
             F.softplus(self.atac_head(atac_hidden)),
             F.softplus(self.h3k27ac_head(h3k27ac_hidden)),
         )
+        if self.output_scaling is not None:
+            from .alphagenome_loss import inverse_soft_clip
+
+            outputs = tuple(
+                inverse_soft_clip(values) * getattr(self, f"{assay}_output_means")
+                for assay, values in zip(("atac", "h3k27ac"), outputs, strict=True)
+            )
+        return outputs
 
 
 def infer_model_preset(architecture: dict[str, object]) -> str:

@@ -238,3 +238,32 @@ def scientific_composite(metrics: dict[str, dict[str, Any]]) -> float:
     if not math.isfinite(score):
         raise ValueError("Scientific composite is not finite")
     return score
+
+
+def regulatory_overcorrelation_summary(
+    metrics: dict[str, dict[str, Any]],
+) -> dict[str, float | int]:
+    """Summarize excess pairwise context correlation on regulatory windows."""
+    differences = []
+    for assay in ASSAYS:
+        structure = metrics[assay]["regulatory_windows"]["correlation_structure"]
+        truth = np.asarray(structure["true_matrix"], dtype=np.float64)
+        predicted = np.asarray(structure["predicted_matrix"], dtype=np.float64)
+        if (
+            truth.shape != predicted.shape
+            or truth.ndim != 2
+            or truth.shape[0] != truth.shape[1]
+        ):
+            raise ValueError("Regulatory correlation matrices have the wrong shape")
+        rows, columns = np.triu_indices(truth.shape[0], 1)
+        differences.append(predicted[rows, columns] - truth[rows, columns])
+    values = np.concatenate(differences)
+    values = values[np.isfinite(values)]
+    if not len(values):
+        raise ValueError("No finite regulatory correlation differences")
+    return {
+        "pairs": int(len(values)),
+        "mean_positive_excess": float(np.maximum(values, 0).mean()),
+        "mean_absolute_error": float(np.abs(values).mean()),
+        "mean_signed_difference": float(values.mean()),
+    }

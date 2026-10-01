@@ -4,14 +4,33 @@ import torch
 
 from enhancer_pleiotropy_model.data import WindowRecord
 from enhancer_pleiotropy_model.training import (
+    balance_specific_peak_contexts,
     CrestedCosineMSELogLoss,
     WarmupPlateauScheduler,
     build_loss_criteria,
     calculate_losses,
+    checkpoint_tensors_to_cpu,
     context_gini,
     fit_specificity_thresholds,
     select_specific_peak_indices,
+    select_specific_peak_indices_and_contexts,
 )
+
+
+def test_checkpoint_tensors_are_detached_and_moved_to_cpu():
+    source = torch.tensor([1.0], requires_grad=True)
+    converted = checkpoint_tensors_to_cpu(
+        {"tensor": source, "nested": [source, (source,)]}
+    )
+
+    for tensor in (
+        converted["tensor"],
+        converted["nested"][0],
+        converted["nested"][1][0],
+    ):
+        assert tensor.device.type == "cpu"
+        assert tensor.requires_grad is False
+        torch.testing.assert_close(tensor, source.detach())
 
 
 def test_learning_rate_warmup_cosine_transition_and_hold():
@@ -137,3 +156,34 @@ def test_context_gini_and_specific_peak_union_are_assay_aware():
         "h3k27ac_specific": 1,
         "union_specific": 2,
     }
+    selected_with_contexts, dominant_contexts, detailed_counts = (
+        select_specific_peak_indices_and_contexts(records, atac, h3k27ac, thresholds)
+    )
+    np.testing.assert_array_equal(selected_with_contexts, selected)
+    np.testing.assert_array_equal(dominant_contexts, [0, 0])
+    assert detailed_counts == counts
+
+
+def test_specificity_context_balancing_is_equal_and_reproducible():
+    indices = np.arange(10)
+    dominant_contexts = np.asarray([0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
+    first, metadata = balance_specific_peak_contexts(
+        indices,
+        dominant_contexts,
+        context_count=3,
+        seed=17,
+        maximum_oversampling_factor=2,
+    )
+    second, _ = balance_specific_peak_contexts(
+        indices,
+        dominant_contexts,
+        context_count=3,
+        seed=17,
+        maximum_oversampling_factor=2,
+    )
+    np.testing.assert_array_equal(first, second)
+    # Median group size is four and the rarest group may be repeated at most 2x.
+    assert metadata["target_examples_per_context"] == 4
+    assert metadata["after_counts"] == [4, 4, 4]
+    assert metadata["examples"] == 12
+    assert set(indices).issubset(set(first))

@@ -1,0 +1,10 @@
+# Python 3.11. Install torch 2.5.1 separately using the matching CUDA wheel.
+# Source-tree bootstrap avoids installing the historical experiment packages.
+numpy==2.2.6
+scipy==1.15.2
+pandas==2.2.3
+PyYAML==6.0.2
+pyBigWig==0.3.24
+h5py==3.13.0
+reportlab==4.4.9
+pytest==8.3.5

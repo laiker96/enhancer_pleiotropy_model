@@ -1,0 +1,47 @@
+{
+  "checkpoint": "results/classifier_calibrated_context_20260921/inputs/best_model.pt",
+  "checkpoint_sha256": "7dc8eb721fbd4f292eba95ff2ea44399cfd1aae5a596e8d56e6d7ff25a95628a",
+  "epoch": 38,
+  "seed": 20260914,
+  "model": "background__cnn_finetune_20260914",
+  "parameters": 1244168,
+  "input_shape": [
+    4,
+    2048
+  ],
+  "output_shape": [
+    8
+  ],
+  "regression_profiles": {
+    "atac": {
+      "input_interval": [
+        768,
+        1280
+      ],
+      "shape": [
+        32,
+        8
+      ],
+      "bin_bp": 16
+    },
+    "h3k27ac": {
+      "input_interval": [
+        256,
+        1792
+      ],
+      "shape": [
+        24,
+        8
+      ],
+      "bin_bp": 64
+    }
+  },
+  "training": "regressor-pretrained retained assay heads; 3 enhancers per background",
+  "audit_sha256": "225c0b3ceb41f617c2d3b0e27cf4a55a74e90cb2ce2a5a4caf79816a0fbe34c9",
+  "script_sha256": "6c21f34dd6fa43e6b48fdbb09d89f1e46c731a7f2976ada66c5828c3443c464c",
+  "text_labels": 50,
+  "text_overlaps": 0,
+  "schematic_note": "DNA, connections and signal profiles are illustrative, not empirical predictions. Dashed branches are pretraining-only signal projections, removed during classification; 16-bp ATAC and 64-bp H3K27ac profiles cover the central 512/1536 bp respectively. Grey profile flanks are unpredicted, not zero signal. Dropout and inference calibration are omitted from the compact head schematic.",
+  "calibrated_inference": "Mean forward/RC sigmoid probabilities; context-wise sigmoid on their clipped logits.",
+  "pdf_sha256": "3f74e75c4ec5818cf443a03e831acfd7eb409fa87c8ade0419f588922c6e180d"
+}

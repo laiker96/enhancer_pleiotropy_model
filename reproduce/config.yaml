@@ -1,0 +1,77 @@
+# Paths are relative to project_root, itself relative to this file.
+version: 1
+project_root: ..
+paths:
+  archive: data/raw/drosophila_ccre_regulatory_analysis_bundle_v4.tar
+  inputs: data/raw/reproduction_v4
+  work: results/reproduction_v1
+  regression_config: reproduce/regression.yaml
+  figure_source: reproduce/figure3/source.json
+  figure_style: reproduce/figure3/style.json
+  font_directory: /usr/share/fonts/truetype/dejavu
+architectures: [cnn, attention, dense]
+readouts: [legacy, retained_assay_hidden_v1]
+populations: [enhancer_only, background]
+seeds: [20260914, 20260915, 20260916]
+# Named selections keep the scientific training settings unchanged. Each gets
+# paths.work/RECIPE; always pass --recipe consistently across stages/resumption.
+recipes:
+  best:
+    architectures: [cnn]
+    readouts: [retained_assay_hidden_v1]
+    populations: [background]
+  architectures:
+    architectures: [cnn, attention, dense]
+    readouts: [retained_assay_hidden_v1]
+    populations: [background]
+  readouts:
+    architectures: [cnn, attention]
+    readouts: [legacy, retained_assay_hidden_v1]
+    populations: [enhancer_only]
+    analysis_classifier:
+      architecture: cnn
+      readout: retained_assay_hidden_v1
+      population: enhancer_only
+      mode: finetune
+      seed: 20260914
+  full: {}
+classifier:
+  epochs: 40
+  batch_size: 64
+  max_learning_rate: 0.0001
+  finetune_encoder_factor: 0.1
+  weight_decay: 0.01
+  gradient_clip_norm: 1.0
+analysis_classifier:
+  architecture: cnn
+  readout: retained_assay_hidden_v1
+  population: background
+  mode: finetune
+  seed: 20260914
+attribution:
+  references: 100
+  steps: 64
+  seed: 20260916
+  enhancer_batch: 16
+  reference_block: 4
+  pair_batch: 8
+  internal_batch: 128
+  target_batch: 1
+  shards: 80
+  max_seconds: 82800
+discovery:
+  target: calibrated_breadth
+  grouping: nonoverlap  # 1 / 2-5 / 6-8; cumulative is also supported
+  flank_threshold: 0.2
+  max_seqlets_per_sign: 20000
+  seed: 20260916
+  sliding_window_size: 20
+  flank_size: 5
+  trim_to_window_size: 30
+  initial_flank_to_add: 10
+  final_flank_to_add: 0
+  n_leiden_runs: 2
+  target_seqlet_fdr: 0.05
+# Supply local MEME-format databases; no network downloads happen implicitly.
+motif_databases: {}
+# Example: jaspar: data/raw/motifs/jaspar2026_insects.meme

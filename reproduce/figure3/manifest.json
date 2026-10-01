@@ -1,0 +1,11 @@
+{
+  "status": "complete",
+  "files": {
+    "source.json": "ba510047815db018a26a456b95d9b31792ccf04922224508e91d60e6c3e8c2c7",
+    "style.json": "d4dd9b1d0d986439089e791fb02aec20ac6e542b8a531cbae70e8f20b6660d2b"
+  },
+  "historical_pdf_sha256": "5c4b6c3a800bf12eabbaec76c4d875a5b86886a3c4e07386c4162d9f2924c9a3",
+  "source_file_sha256": "ba510047815db018a26a456b95d9b31792ccf04922224508e91d60e6c3e8c2c7",
+  "audit_file_sha256": "b8a08727c457452fe81a0177a04ef67f8aea23332ba201f111c7bf7adce4f7cf",
+  "role": "Render-only historical figure replay. These values are not outputs of a newly trained model."
+}

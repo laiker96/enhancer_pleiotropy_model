@@ -1,4 +1,7 @@
 .venv/
+.venv-reproduce/
+.venv-modisco/
+reproduce/slurm/site.yaml
 .snakemake/
 .cache/
 .pytest_cache/
@@ -11,6 +14,9 @@ results/
 data/raw/
 data/processed/
 logs/
+output/
+outputs/
+tmp/
 slurm-*.out
 *.pt
 *.pth
