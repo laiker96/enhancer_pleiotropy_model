@@ -66,7 +66,10 @@ training. Training never reads the test split.
 
 ## Inputs and outputs
 
-`epm prepare-data` reads only drosophila-cCREs outputs:
+`epm prepare-data` reads only drosophila-cCREs outputs. It is written for drosophila-cCREs
+commit [`8508143`](https://github.com/laiker96/drosophila-cCREs/commit/850814395a5482a31bab8628526d8eaabb4d2987),
+the eight-context ATAC/H3K27ac atlas. It prints the manuscript's window and enhancer counts next to
+yours, so you can see whether your run reproduces the same dataset.
 
 | Input | Path in drosophila-cCREs |
 |---|---|

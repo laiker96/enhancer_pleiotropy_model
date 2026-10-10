@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software or its trained models, please cite the manuscript (reference to be added on publication) and the Zenodo record below."
+title: "Enhancer pleiotropy model"
+type: software
+authors:
+  - family-names: Laiker
+    given-names: Ian
+  - name: Frankel lab
+license: MIT
+version: 1.0.0
+repository-code: "https://github.com/laiker96/enhancer_pleiotropy_model"
+keywords: [Drosophila, enhancer, pleiotropy, deep learning, integrated gradients]
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23287237
+    description: "Trained checkpoints, attribution maps and training data (Zenodo, version 1.0.0)"
+references:
+  - type: data
+    title: "Enhancer pleiotropy model: trained checkpoints, attribution maps and training data"
+    authors:
+      - family-names: Laiker
+        given-names: Ian
+      - family-names: Frankel
+        given-names: Nicolás
+    doi: 10.5281/zenodo.23287237
+    version: 1.0.0
+    publisher:
+      name: Zenodo
+    year: 2026
