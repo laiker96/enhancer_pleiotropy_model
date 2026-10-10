@@ -1,0 +1,20 @@
+# Attribution maps: `epm attribute [--shard i --shards n]`
+# Integrated gradients for the eight calibrated context probabilities of every enhancer.
+# Cost: ~13 GPU-minutes per 16 enhancers on an RTX 2080 (~540 GPU-hours for all 40,338);
+# split the work over GPUs with --shard/--shards. Interrupted chunks resume where they stopped.
+
+classifier: runs/classifiers/cnn_pretrained_20260914/best_model.pt
+calibration: null                  # default: calibration.json next to the classifier (run `epm calibrate` first)
+data: data/classification
+output: runs/attribution/cnn_pretrained_20260914
+device: cuda
+
+references: 100                    # dinucleotide-shuffled references per enhancer
+steps: 64                          # Gauss-Legendre integration nodes
+seed: 20260916                     # reference shuffles are seeded by (seed, enhancer ID, reference)
+enhancers_per_chunk: 16            # one output file per chunk
+reference_block: 4                 # references processed between checkpoints
+pair_batch: 8                      # (enhancer, reference) pairs per integration batch
+internal_batch: 128                # interpolated inputs per forward/backward pass (lower if out of memory)
+target_batch: 1                    # targets per backward pass
+interleaved_dilation: true         # faster deterministic dilated convolutions (same model)

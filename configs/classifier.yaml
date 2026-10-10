@@ -1,0 +1,20 @@
+# Classifier training: `epm train-classifier --architecture cnn --init pretrained --seed 20260914`
+
+data: data/classification
+regressors: runs/regressors        # pretrained parent: <regressors>/<architecture>/best_model.pt
+output: runs/classifiers           # the model is written to <output>/<architecture>_<init>_<seed>/
+architecture: cnn                  # cnn | attention | dense | enhancernet_cnn | enhancernet_attention
+init: pretrained                   # pretrained (fine-tune the regressor) | scratch
+seed: 20260914
+readout: auto                      # auto (manuscript) | assay_heads (cnn/attention only) | new_head
+device: cuda
+
+training:
+  epochs: 40
+  batch_size: 64                   # enhancers per batch (backgrounds are added on top)
+  max_learning_rate: 1.0e-4
+  finetune_encoder_factor: 0.1     # pretrained encoder learns at 0.1 x the head's rate
+  weight_decay: 0.01
+  gradient_clip_norm: 1.0
+  background: true                 # add one GC-matched genomic background per 3 enhancers
+  max_batches_per_epoch: null      # set a small value for a quick smoke test

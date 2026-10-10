@@ -1,0 +1,10 @@
+# Every model in the manuscript's architecture comparison (Figure S3):
+# 5 regressors, then 5 architectures x {pretrained, scratch} x 3 seeds = 30 classifiers.
+# `epm manuscript` prints the 35 commands; `epm manuscript --run` executes them in order.
+# The model used for interpretation is cnn / pretrained / seed 20260914.
+
+regressor_config: configs/regressor.yaml
+classifier_config: configs/classifier.yaml
+architectures: [cnn, attention, dense, enhancernet_cnn, enhancernet_attention]
+inits: [pretrained, scratch]
+seeds: [20260914, 20260915, 20260916]

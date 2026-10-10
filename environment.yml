@@ -1,18 +1,21 @@
-name: enhancer-pleiotropy-model
+# mamba env create -f environment.yml && mamba activate epm
+# Versions used for the manuscript models. PyTorch comes from the official
+# CUDA 12.1 wheels; change the index URL for another CUDA version or CPU only
+# (https://pytorch.org/get-started/previous-versions/).
+name: epm
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
+  - bioconda
 dependencies:
   - python=3.11
-  - pip
-  - pytorch=2.5.1
-  - pytorch-cuda=11.8
   - numpy=2.2
   - pandas=2.2
   - scipy=1.15
   - pyyaml=6.0
+  - pybigwig=0.3.24
+  - pytest
+  - pip
   - pip:
-      - pyBigWig>=0.3.22,<0.4
-      - snakemake>=8,<10
-      - pytest>=8,<10
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.5.1
+      - -e .

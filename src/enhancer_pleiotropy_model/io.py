@@ -1,4 +1,4 @@
-"""Small deterministic I/O and genomic interval helpers."""
+"""Small deterministic file and genomic-interval helpers."""
 
 from __future__ import annotations
 
@@ -10,8 +10,11 @@ from pathlib import Path
 import tempfile
 from typing import Any, Iterable, TextIO
 
+import numpy as np
+
 
 def open_text(path: Path) -> TextIO:
+    path = Path(path)
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8", newline="")
     return path.open(encoding="utf-8", newline="")
@@ -19,31 +22,50 @@ def open_text(path: Path) -> TextIO:
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
 
 def atomic_write_text(path: Path, content: str) -> None:
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        delete=False,
+        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
     ) as handle:
         handle.write(content)
         temporary = Path(handle.name)
     temporary.replace(path)
 
 
-def atomic_write_json(path: Path, value: Any) -> None:
-    atomic_write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n")
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _json_ready(value.tolist())
+    if isinstance(value, np.generic):
+        return _json_ready(value.item())
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
+
+
+def write_json(path: Path, value: Any) -> None:
+    """Atomically write JSON; NaN/inf become null and NumPy values become Python."""
+    atomic_write_text(path, json.dumps(_json_ready(value), indent=2, allow_nan=False) + "\n")
+
+
+def read_json(path: Path) -> Any:
+    return json.loads(Path(path).read_text())
 
 
 def read_fasta(path: Path) -> tuple[dict[str, str], list[str]]:
+    """Return upper-case sequences by name and the record order."""
     sequences: dict[str, list[str]] = {}
     order: list[str] = []
     current: str | None = None
@@ -55,9 +77,7 @@ def read_fasta(path: Path) -> tuple[dict[str, str], list[str]]:
             if stripped.startswith(">"):
                 current = stripped[1:].split()[0]
                 if not current or current in sequences:
-                    raise ValueError(
-                        f"{path}:{line_number}: duplicate or blank FASTA record"
-                    )
+                    raise ValueError(f"{path}:{line_number}: duplicate or blank FASTA record")
                 sequences[current] = []
                 order.append(current)
             elif current is None:
@@ -66,7 +86,7 @@ def read_fasta(path: Path) -> tuple[dict[str, str], list[str]]:
                 sequences[current].append(stripped.upper())
     if not sequences:
         raise ValueError(f"{path}: no FASTA records")
-    return {chrom: "".join(parts) for chrom, parts in sequences.items()}, order
+    return {name: "".join(parts) for name, parts in sequences.items()}, order
 
 
 def read_bed_intervals(path: Path) -> dict[str, list[tuple[int, int]]]:
@@ -79,16 +99,15 @@ def read_bed_intervals(path: Path) -> dict[str, list[tuple[int, int]]]:
             fields = stripped.split("\t")
             if len(fields) < 3:
                 raise ValueError(f"{path}:{line_number}: expected BED3+")
-            chrom, start_text, end_text = fields[:3]
-            start, end = int(start_text), int(end_text)
+            start, end = int(fields[1]), int(fields[2])
             if start < 0 or end <= start:
                 raise ValueError(f"{path}:{line_number}: invalid interval")
-            intervals.setdefault(chrom, []).append((start, end))
+            intervals.setdefault(fields[0], []).append((start, end))
     return intervals
 
 
-class MutableIntervalIndex:
-    """Small sorted interval index used during deterministic window sampling."""
+class IntervalIndex:
+    """Sorted, merged half-open intervals with a fast overlap query."""
 
     def __init__(self, intervals: Iterable[tuple[int, int]]) -> None:
         merged: list[list[int]] = []
@@ -107,10 +126,3 @@ class MutableIntervalIndex:
         if index and self.ends[index - 1] > start:
             return True
         return index < len(self.starts) and self.starts[index] < end
-
-    def add(self, start: int, end: int) -> None:
-        if self.overlaps(start, end):
-            raise ValueError("Cannot add an overlapping interval")
-        index = bisect_left(self.starts, start)
-        self.starts.insert(index, start)
-        self.ends.insert(index, end)

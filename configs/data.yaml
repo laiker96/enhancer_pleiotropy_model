@@ -1,0 +1,61 @@
+# Dataset preparation: `epm prepare-data --config configs/data.yaml`
+#
+# All inputs are outputs of the drosophila-cCREs pipeline
+# (https://github.com/laiker96/drosophila-cCREs). Point `ccre` at your checkout
+# and set the run IDs you used there. Relative paths are relative to the
+# directory you run `epm` from.
+
+ccre: ../drosophila-cCREs
+atlas: ${ccre}/results/drosophila-atlas
+output: data                       # writes data/regression and data/classification
+
+inputs:
+  reference_fasta: ${ccre}/references/dm6/dm6.fa
+  blacklist: ${ccre}/references/dm6/dm6.blacklist.bed           # ENCODE dm6 blacklist v2
+  master_dhs: ${atlas}/master-v1/atac/master/master_dhs.bed
+  master_dhs_summits: ${atlas}/master-v1/atac/master/master_dhs_summits.bed
+  catalog: ${atlas}/catalog-v1/activity/catalog/master_elements_wide.tsv.gz
+  bigwigs: ${atlas}/catalog-v1/activity/catalog/tracks             # <context>.<assay>.mean.background_tmm.bw
+  h3k27ac_peaks: ${ccre}/results/drosophila-atlas.chip_histone.dm6/qc-v1/peaks   # <library>/<library>_peaks.broadPeak
+  h3k27ac_libraries:                 # replicate peak sets per context
+    ab: [ab_h3k27ac_rep1, ab_h3k27ac_rep2]
+    e13: [e13_h3k27ac_rep1, e13_h3k27ac_rep2]
+    e5: [e5_h3k27ac_rep1, e5_h3k27ac_rep2]
+    ead: [ead_h3k27ac_rep1]
+    hid: [hid_h3k27ac_rep1, hid_h3k27ac_rep2]
+    lb: [lb_h3k27ac_rep1, lb_h3k27ac_rep2]
+    o: [o_h3k27ac_cutrun_rep1]
+    wid: [wid_h3k27ac_gfp2, wid_h3k27ac_gfp3]
+
+# Shared by both datasets. A 2,048-bp input must lie entirely inside one split;
+# a 10-kb gap separates validation and training on chr2L.
+splits:
+  train:
+    chromosomes: [chrX, chr2R, chr3L, chr4, chrUn_CP007081v1, chrUn_CP007120v1, chrY]
+    regions: ["chr2L:11761856-23513712"]
+  validation:
+    chromosomes: []
+    regions: ["chr2L:0-11751856"]
+  test:
+    chromosomes: [chr3R]
+    regions: []
+
+regression:                        # genome-wide windows for regressor pretraining
+  seed: 20260829
+  target_bp: 512                   # central target; input = target + 2 x flank = 2,048 bp
+  flank_bp: 768
+  train_stride_bp: 128
+  validation_stride_bp: 256        # also used for test
+  background_to_peak_ratio: 1.0    # background windows kept per regulatory window
+  block_size_bp: 1000000           # only labels windows (block_id); does not change sampling
+  atac_profile_bp: 512             # 32 x 16-bp bins
+  h3k27ac_profile_bp: 1536         # 96 x 16-bp bins (pooled to 24 x 64 bp in training)
+
+enhancers:                         # classifier labels
+  classes: [distal_enhancer_like, proximal_enhancer_like]
+  h3k27ac_background_percentile: 0.6   # active = DHS member AND H3K27ac above this background percentile
+
+background:                        # GC-matched genomic negatives for the classifiers
+  seed: 20260916                   # train/validation matching
+  test_seed: 20260915              # test matching
+  gc_caliper: 0.02                 # max |GC difference| (whole input and central 512 bp)

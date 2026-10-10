@@ -1,41 +1,29 @@
 [build-system]
-requires = ["setuptools>=75", "wheel"]
+requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "enhancer-pleiotropy-model"
-version = "0.1.0"
-description = "Train and load a multi-context Drosophila ATAC/H3K27ac sequence model"
+version = "1.0.0"
+description = "Sequence models of Drosophila enhancer activity across eight developmental contexts"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Ian Laiker" }, { name = "Frankel lab" }]
+requires-python = ">=3.10"
 dependencies = [
-  "numpy>=2.1,<2.3",
-  "pandas>=2.2,<2.4",
-  "pyBigWig>=0.3.24,<0.4",
-  "PyYAML>=6.0,<7",
-  "scipy>=1.14,<1.16",
-  "torch>=2.5,<2.6",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "scipy>=1.10",
+  "PyYAML>=6.0",
+  "pyBigWig>=0.3.22",
+  "torch>=2.5",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
 [project.scripts]
-enhancer-build-h3-consensus = "enhancer_pleiotropy_model.preprocessing.h3_peaks:main"
-enhancer-build-windows = "enhancer_pleiotropy_model.preprocessing.windows:main"
-enhancer-build-profiles = "enhancer_pleiotropy_model.preprocessing.profiles:main"
-enhancer-train = "enhancer_pleiotropy_model.training:main"
-enhancer-predict = "enhancer_pleiotropy_model.inference:main"
-enhancer-browser-tracks = "enhancer_pleiotropy_model.browser_tracks:main"
-enhancer-browser-report = "enhancer_pleiotropy_model.browser_report:main"
-enhancer-browser-comparison = "enhancer_pleiotropy_model.browser_comparison:main"
-enhancer-browser-comparison-report = "enhancer_pleiotropy_model.browser_comparison_report:main"
-enhancer-compare-models-on-enhancers = "enhancer_pleiotropy_model.enhancer_model_comparison_inference:main"
-enhancer-report-models-on-enhancers = "enhancer_pleiotropy_model.enhancer_model_comparison_report:main"
-enhancer-evaluate-catalog = "enhancer_pleiotropy_model.enhancer_catalog_evaluation:main"
-enhancer-calibrate = "enhancer_pleiotropy_model.enhancer_calibration:main"
-enhancer-audit-calibrator = "enhancer_pleiotropy_model.enhancer_calibration_audit:main"
-enhancer-evaluate-continuous-activity = "enhancer_pleiotropy_model.continuous_activity:main"
-enhancer-build-master-states = "enhancer_pleiotropy_model.master_element_states:main"
-enhancer-calibrate-master-states = "enhancer_pleiotropy_model.master_element_calibration:main"
-enhancer-evaluate-residual-ensemble = "enhancer_pleiotropy_model.residual_ensemble:main"
+epm = "enhancer_pleiotropy_model.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
