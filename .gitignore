@@ -1,6 +1,7 @@
 # Prepared datasets and training outputs (never committed)
 /data/
 /runs/
+/checksums/
 *.pt
 *.npy
 *.npz

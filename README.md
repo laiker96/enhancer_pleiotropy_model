@@ -83,6 +83,18 @@ epm attribute --shard 0 --shards 8   # ... through --shard 7
 `epm manuscript` lists the 35 runs of the paper's architecture comparison (5 regressors and
 30 classifiers). Every command has `--help`.
 
+## Pretrained models and attribution maps
+
+The manuscript's 35 trained models, the primary model's calibration and attribution maps for all
+40,338 enhancers, and the prepared datasets are on Zenodo:
+[10.5281/zenodo.23287237](https://doi.org/10.5281/zenodo.23287237). Download the files into this
+directory and unpack them with `for t in *.tar; do tar -xf "$t"; done`. They land in
+`runs/` and `data/`, where the commands above find them. For example:
+
+```bash
+epm predict runs/classifiers/cnn_pretrained_20260914/best_model.pt --bed regions.bed --genome dm6.fa --output p.tsv
+```
+
 ## Documentation
 
 - [Usage details](docs/usage.md) — reproducing all models (including on Slurm), run times,
