@@ -27,3 +27,15 @@ references:
     publisher:
       name: Zenodo
     year: 2026
+  - type: data
+    title: "Drosophila cis-regulatory atlas across eight developmental contexts: processed ATAC-seq and H3K27ac outputs and TOBIAS footprinting"
+    authors:
+      - family-names: Laiker
+        given-names: Ian
+      - family-names: Frankel
+        given-names: Nicolás
+    doi: 10.5281/zenodo.23296290
+    version: v4
+    publisher:
+      name: Zenodo
+    year: 2026

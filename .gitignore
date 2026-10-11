@@ -2,6 +2,7 @@
 /data/
 /runs/
 /checksums/
+/atlas/
 *.pt
 *.npy
 *.npz

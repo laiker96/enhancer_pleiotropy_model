@@ -66,18 +66,26 @@ training. Training never reads the test split.
 
 ## Inputs and outputs
 
-`epm prepare-data` reads only drosophila-cCREs outputs. It is written for drosophila-cCREs
-commit [`8508143`](https://github.com/laiker96/drosophila-cCREs/commit/850814395a5482a31bab8628526d8eaabb4d2987),
-the eight-context ATAC/H3K27ac atlas. It prints the manuscript's window and enhancer counts next to
-yours, so you can see whether your run reproduces the same dataset.
+`epm prepare-data` reads only drosophila-cCREs outputs, from one of two places:
 
-| Input | Path in drosophila-cCREs |
-|---|---|
-| dm6 genome and ENCODE blacklist v2 | `references/dm6/dm6.fa`, `dm6.blacklist.bed` |
-| Master DHS set and summits | `results/<project>/<master run>/atac/master/master_dhs{,_summits}.bed` |
-| Normalized ATAC and H3K27ac bigWigs (16) | `results/<project>/<catalog run>/activity/catalog/tracks/<context>.<assay>.mean.background_tmm.bw` |
-| H3K27ac replicate peaks | `results/<project>.chip_histone.dm6/<qc run>/peaks/<library>/<library>_peaks.broadPeak` |
-| Regulatory-element catalog | `results/<project>/<catalog run>/activity/catalog/master_elements_wide.tsv.gz` |
+- **The archived atlas (default, `configs/data.yaml`).** This is the exact input of the manuscript, the
+  drosophila-cCREs v4 export on Zenodo ([10.5281/zenodo.23296290](https://doi.org/10.5281/zenodo.23296290)).
+  `epm prepare-data` on it reproduces the manuscript's training datasets exactly.
+- **Your own pipeline run (`configs/data_pipeline.yaml`).** Point `ccre:` at a checkout of drosophila-cCREs
+  (written for commit
+  [`8508143`](https://github.com/laiker96/drosophila-cCREs/commit/850814395a5482a31bab8628526d8eaabb4d2987),
+  the eight-context atlas) and set its run IDs. `prepare-data` prints the manuscript's window and enhancer
+  counts next to yours, so you can see whether your run reproduces the same dataset.
+
+The files used, and where a pipeline run writes them:
+
+| Input | In the archive (`drosophila_ccre_regulatory_analysis_bundle_v4/`) | In a pipeline run |
+|---|---|---|
+| dm6 genome and ENCODE blacklist v2 | `reference/dm6.fa`, `reference/dm6.blacklist.bed` | `references/dm6/dm6.fa`, `dm6.blacklist.bed` |
+| Master DHS set and summits | `regulatory/master_dhs/master_dhs{,_summits}.bed` | `results/<project>/<master run>/atac/master/master_dhs{,_summits}.bed` |
+| Normalized ATAC and H3K27ac bigWigs (16) | `regulatory/normalized_mean_bigwig/` | `results/<project>/<catalog run>/activity/catalog/tracks/` |
+| H3K27ac replicate peaks | `regulatory/h3k27ac/peaks/<library>_peaks.broadPeak` | `results/<project>.chip_histone.dm6/<qc run>/peaks/<library>/<library>_peaks.broadPeak` |
+| Regulatory-element catalog | `catalog/master_elements_wide.tsv.gz` | `results/<project>/<catalog run>/activity/catalog/master_elements_wide.tsv.gz` |
 
 It writes:
 

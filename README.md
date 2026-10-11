@@ -13,7 +13,9 @@ Training has two stages:
 
 This repository builds the training data, trains every model in the manuscript, calibrates the
 classifiers, predicts on new sequences and computes attribution maps (integrated gradients).
-The input data come from [drosophila-cCREs](https://github.com/laiker96/drosophila-cCREs).
+The input data are the processed outputs of
+[drosophila-cCREs](https://github.com/laiker96/drosophila-cCREs), archived on Zenodo
+([10.5281/zenodo.23296290](https://doi.org/10.5281/zenodo.23296290)).
 
 ![Best model: 2,048-bp DNA input, residual CNN stem, six dilated convolutions, retained pretrained assay heads and eight context outputs](docs/figures/best_model_architecture.png)
 
@@ -46,13 +48,18 @@ PyTorch index URL in `environment.yml`.
 Run the commands from the repository root. Each reads its settings from `configs/`, and any
 value can be overridden with `--set key=value`.
 
-**1. Prepare the data** (about 15 min on CPU). First run drosophila-cCREs through its `qc`,
-`master` and `catalog` stages, and set `ccre:` in [`configs/data.yaml`](configs/data.yaml) to
-that checkout. Then:
+**1. Prepare the data** (about 15 min on CPU). Download the drosophila-cCREs atlas used in the
+manuscript (6.7 GB) and build the training datasets from it:
 
 ```bash
+mkdir -p atlas && curl -L -o atlas/atlas_v4.tar \
+  "https://zenodo.org/records/23296290/files/drosophila_ccre_regulatory_analysis_bundle_v4.tar?download=1"
+tar -xf atlas/atlas_v4.tar -C atlas
 epm prepare-data
 ```
+
+To start from your own drosophila-cCREs run instead, use
+`epm prepare-data --config configs/data_pipeline.yaml` (see [Usage details](docs/usage.md#inputs-and-outputs)).
 
 **2–3. Train a regressor, then a classifier** (GPU):
 

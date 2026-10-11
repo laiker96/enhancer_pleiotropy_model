@@ -24,8 +24,9 @@ def input_paths(config: dict) -> dict:
     paths = {key: Path(inputs[key]) for key in
              ("reference_fasta", "blacklist", "master_dhs", "master_dhs_summits", "catalog")}
     paths["bigwigs"] = [bigwig_path(inputs["bigwigs"], c, a) for a in ASSAYS for c in CONTEXTS]
+    pattern = inputs.get("h3k27ac_peak_file", "{library}/{library}_peaks.broadPeak")
     paths["h3k27ac_peaks"] = {
-        context: [Path(inputs["h3k27ac_peaks"]) / library / f"{library}_peaks.broadPeak"
+        context: [Path(inputs["h3k27ac_peaks"]) / pattern.format(library=library)
                   for library in inputs["h3k27ac_libraries"][context]]
         for context in CONTEXTS}
     files = [*(paths[k] for k in ("reference_fasta", "blacklist", "master_dhs", "master_dhs_summits", "catalog")),

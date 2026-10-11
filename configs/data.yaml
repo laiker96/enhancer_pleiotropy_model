@@ -1,22 +1,23 @@
-# Dataset preparation: `epm prepare-data --config configs/data.yaml`
+# Dataset preparation: `epm prepare-data`
 #
-# All inputs are outputs of the drosophila-cCREs pipeline
-# (https://github.com/laiker96/drosophila-cCREs). Point `ccre` at your checkout
-# and set the run IDs you used there. Relative paths are relative to the
-# directory you run `epm` from.
+# Inputs are the processed drosophila-cCREs outputs used in the manuscript, archived
+# on Zenodo (doi:10.5281/zenodo.23296290). Download drosophila_ccre_regulatory_analysis_bundle_v4.tar and
+# unpack it here (see README); `atlas` must point at the unpacked directory.
+# To use a fresh pipeline run instead, see configs/data_pipeline.yaml.
+# Relative paths are relative to the directory you run `epm` from.
 
-ccre: ../drosophila-cCREs
-atlas: ${ccre}/results/drosophila-atlas
+atlas: atlas/drosophila_ccre_regulatory_analysis_bundle_v4
 output: data                       # writes data/regression and data/classification
 
 inputs:
-  reference_fasta: ${ccre}/references/dm6/dm6.fa
-  blacklist: ${ccre}/references/dm6/dm6.blacklist.bed           # ENCODE dm6 blacklist v2
-  master_dhs: ${atlas}/master-v1/atac/master/master_dhs.bed
-  master_dhs_summits: ${atlas}/master-v1/atac/master/master_dhs_summits.bed
-  catalog: ${atlas}/catalog-v1/activity/catalog/master_elements_wide.tsv.gz
-  bigwigs: ${atlas}/catalog-v1/activity/catalog/tracks             # <context>.<assay>.mean.background_tmm.bw
-  h3k27ac_peaks: ${ccre}/results/drosophila-atlas.chip_histone.dm6/qc-v1/peaks   # <library>/<library>_peaks.broadPeak
+  reference_fasta: ${atlas}/reference/dm6.fa
+  blacklist: ${atlas}/reference/dm6.blacklist.bed              # ENCODE dm6 blacklist v2
+  master_dhs: ${atlas}/regulatory/master_dhs/master_dhs.bed
+  master_dhs_summits: ${atlas}/regulatory/master_dhs/master_dhs_summits.bed
+  catalog: ${atlas}/catalog/master_elements_wide.tsv.gz
+  bigwigs: ${atlas}/regulatory/normalized_mean_bigwig            # <context>.<assay>.mean.background_tmm.bw
+  h3k27ac_peaks: ${atlas}/regulatory/h3k27ac/peaks
+  h3k27ac_peak_file: "{library}_peaks.broadPeak"
   h3k27ac_libraries:                 # replicate peak sets per context
     ab: [ab_h3k27ac_rep1, ab_h3k27ac_rep2]
     e13: [e13_h3k27ac_rep1, e13_h3k27ac_rep2]
